@@ -1,0 +1,42 @@
+package org.ivcode.aimo.server.controller
+
+import org.ivcode.aimo.server.model.ChatRequest
+import org.ivcode.aimo.server.service.ChatService
+import org.slf4j.LoggerFactory
+import org.springframework.http.MediaType
+import org.springframework.http.ResponseEntity
+import org.springframework.web.bind.annotation.PathVariable
+import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.RequestBody
+import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RestController
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody
+import java.util.UUID
+
+@RestController
+@RequestMapping("/aimo-api/chat")
+class ChatController (
+    private val chatClientService: ChatService
+) {
+
+    private val log = LoggerFactory.getLogger(javaClass)
+
+    @PostMapping("/{chatId}", produces = [MediaType.APPLICATION_JSON_VALUE, "application/x-ndjson"])
+    fun chat (
+        @PathVariable chatId: UUID,
+        @RequestBody request: ChatRequest
+    ): ResponseEntity<StreamingResponseBody> {
+        val stream = StreamingResponseBody { output ->
+            try {
+                // Delegate to the service which performs the real streaming into 'output'.
+                chatClientService.chat(chatId, request, output)
+            } catch (ex: Exception) {
+                log.error("Error while streaming chat for chatId=$chatId", ex)
+            }
+        }
+
+        return ResponseEntity.ok()
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(stream)
+    }
+}
