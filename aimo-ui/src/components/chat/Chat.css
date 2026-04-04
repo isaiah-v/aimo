@@ -65,6 +65,45 @@
 .chat__thinking_bubble .title .text {
     margin: auto 0 auto 0;
 }
+
+/* tool result bubble (same interaction pattern as thinking) */
+.chat__message.tool {
+    float: left;
+    text-align: left;
+}
+.chat__tool_bubble {
+    font-size: 12px;
+    color: var(--palette-text-secondary, #6b7280);
+    padding: 10px 16px;
+    background-color: var(--palette-background-paper);
+    border-radius: var(--shape-border-radius);
+    border: 1px solid rgba(251, 191, 36, 0.45);
+    display: inline-block;
+    max-width: 80%;
+}
+.chat__tool_bubble .title {
+    display: flex;
+    cursor: pointer;
+    align-items: center;
+}
+.chat__tool_bubble .title .icon {
+    margin: 2px 5px 2px 0;
+    color: #d97706;
+}
+.chat__tool_bubble .title .text {
+    margin: auto 0;
+}
+.chat__tool_pre {
+    margin: 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 11px;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.chat__message.tool .chat__time {
+    text-align: left;
+}
+
 .body {
     overflow: hidden; /* keep element in DOM for animation */
     transition: max-height 300ms ease;

@@ -2,7 +2,6 @@ package org.ivcode.aimo.core.controller
 
 import org.springframework.ai.tool.ToolCallback
 import org.springframework.ai.tool.method.MethodToolCallbackProvider
-import java.lang.reflect.Modifier
 
 internal fun toToolCallbacks(controller: Any): List<ToolCallback> {
     val provider = MethodToolCallbackProvider.builder()
@@ -48,10 +47,15 @@ internal fun toSystemMessageCallbacks(controller: Any): List<SystemMessageCallba
         val params = method.parameterTypes
         val isContextual = when (params.size) {
             0 -> false
-            1 -> params[0] == SystemMessageContext::class.java
+            1 -> {
+                if (params[0] != SystemMessageContext::class.java) {
+                    throw IllegalStateException("Method ${method.name} in ${clazz.name} annotated with @SystemMessage has invalid parameters. Must have either no parameters or a single parameter of type SystemMessageContext.")
+                }
+                true
+            }
             else -> {
                 // invalid signature
-                continue
+                throw IllegalStateException("Method ${method.name} in ${clazz.name} annotated with @SystemMessage has invalid parameters. Must have either no parameters or a single parameter of type SystemMessageContext.")
             }
         }
 
@@ -63,5 +67,3 @@ internal fun toSystemMessageCallbacks(controller: Any): List<SystemMessageCallba
 
     return callbacks
 }
-
-

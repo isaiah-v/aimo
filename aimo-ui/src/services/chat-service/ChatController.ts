@@ -1,8 +1,53 @@
-import {ChatMessage, ChatRequest, chatClient} from '../chat-client/ChatClient'
+import {aimoClient} from '../aimo-client/AimoClient'
+import type {ChatHistoryRequest, ChatMessage, ChatResponse} from '../aimo-client/AimoClientModel'
 import type {ChatHandle} from '../../components/chat/Chat'
 import React from "react";
 import {chatSession} from "../chat-session-service/ChatSession";
 import { historyService } from "../history-service/HistoryService";
+
+function flattenHistory(requests: ChatHistoryRequest[]): ChatMessage[] {
+    const sorted = [...requests].sort((a, b) => a.requestId - b.requestId)
+    return sorted.flatMap((r) =>
+        r.messages.map((m) => ({ ...m, requestId: r.requestId }))
+    )
+}
+
+function lastMessageFromResponse(resp: ChatResponse | null): ChatMessage | undefined {
+    if (!resp?.messages?.length) return undefined
+    return resp.messages[resp.messages.length - 1]
+}
+
+/**
+ * Spring AI often sends growing `content`; some stacks send only the new fragment.
+ */
+function streamTextDeltas(
+    acc: { content: string; thinking: string },
+    msg: ChatMessage
+): { deltaContent: string; deltaThinking: string } {
+    const content = msg.content ?? ''
+    const thinking = msg.thinking ?? ''
+    let deltaContent: string
+    if (content.startsWith(acc.content)) {
+        deltaContent = content.slice(acc.content.length)
+        acc.content = content
+    } else {
+        deltaContent = content
+        acc.content += content
+    }
+    let deltaThinking: string
+    if (thinking.startsWith(acc.thinking)) {
+        deltaThinking = thinking.slice(acc.thinking.length)
+        acc.thinking = thinking
+    } else {
+        deltaThinking = thinking
+        acc.thinking += thinking
+    }
+    return { deltaContent, deltaThinking }
+}
+
+function streamAccKey(responseId: number, messageId: number): string {
+    return `${responseId}:${messageId}`
+}
 
 export class ChatController {
     private chatHandle?: React.RefObject<ChatHandle> | null
@@ -25,7 +70,8 @@ export class ChatController {
             } else {
                 const enableInput = this.chatHandle?.current?.disableInput()
                 try {
-                    const messages = await chatClient.getChatHistory(id)
+                    const history = await aimoClient.getHistory(id)
+                    const messages = flattenHistory(history)
                     this.chatHandle?.current?.setMessages(messages)
 
                     void historyService.fetchHistory()
@@ -58,7 +104,7 @@ export class ChatController {
     onSend = async (userMsg: ChatMessage): Promise<ChatMessage | undefined> => {
         let id = chatSession.id
         if(!id) {
-            const newChat = await chatClient.createChatSession()
+            const newChat = await aimoClient.createChatSession()
 
             // TODO: I need all listeners to finish before proceeding
             id = await chatSession.setId(newChat.chatId)
@@ -67,13 +113,13 @@ export class ChatController {
 
         const handle = this.chatHandle?.current
         if (!handle) {
-            // no UI attached; still call API but cannot update UI
-            const reqFallback: ChatRequest = {message: userMsg.response, stream: false}
+            const reqFallback = { prompt: userMsg.content ?? '', stream: false as const }
 
             const unsetBusy = this.chatHandle?.current?.busy()
             const enableInput = this.chatHandle?.current?.disableInput()
             try {
-                return await chatClient.chat(id, reqFallback)
+                const resp = await aimoClient.chat(id, reqFallback, { onMessage: () => {} })
+                return lastMessageFromResponse(resp)
             } catch {
                 return undefined
             } finally {
@@ -82,34 +128,54 @@ export class ChatController {
             }
         }
 
-        const req: ChatRequest = {message: userMsg.response, stream: true}
-        let isFirstChunk = true
+        const req = { prompt: userMsg.content ?? '', stream: true as const }
+        const streamAccByRequestAndMessage = new Map<string, { content: string; thinking: string }>()
         const unsetBusy = this.chatHandle?.current?.busy()
         const enableInput = this.chatHandle?.current?.disableInput()
         try {
-            // always append incoming chunks to the placeholder message we created above
-            return await chatClient.chat(id, req, {
-                onMessage: (ev: ChatMessage) => {
+            return await aimoClient.chat(id, req, {
+                onMessage: (resp: ChatResponse) => {
+                    const list = resp.messages
+                    if (!list?.length) return
+
                     unsetBusy()
 
-                    if (isFirstChunk) {
-                        isFirstChunk = false
-                        handle.addMessage(ev)
-                    } else {
-                        handle.appendMessage(ev)
+                    const responseId = resp.responseId
+                    for (const apiMsg of list) {
+                        const accKey = streamAccKey(responseId, apiMsg.messageId)
+                        let acc = streamAccByRequestAndMessage.get(accKey)
+                        const withRequest: ChatMessage = { ...apiMsg, requestId: responseId }
+                        if (!acc) {
+                            acc = { content: '', thinking: '' }
+                            streamAccByRequestAndMessage.set(accKey, acc)
+                            handle.addMessage(withRequest)
+                            acc.content = apiMsg.content ?? ''
+                            acc.thinking = apiMsg.thinking ?? ''
+                        } else {
+                            const { deltaContent, deltaThinking } = streamTextDeltas(acc, apiMsg)
+                            if (deltaContent || deltaThinking) {
+                                handle.appendMessage({
+                                    messageId: apiMsg.messageId,
+                                    requestId: responseId,
+                                    type: apiMsg.type,
+                                    content: deltaContent,
+                                    thinking: deltaThinking,
+                                    toolName: apiMsg.toolName,
+                                    createdAt: apiMsg.createdAt,
+                                })
+                            }
+                        }
                     }
-                }
-            })
+                },
+            }).then((resp) => lastMessageFromResponse(resp))
         } catch (err) {
-            // show error text in the assistant message
             const errText = typeof err === 'string' ? err : (err instanceof Error ? err.message : 'Error')
             try {
-                handle.appendMessage({
-                    id: Date.now(),
-                    response: `\n\n[Error] ${errText}`,
-                    role: 'SYSTEM',
-                    timestamp: Date.now(),
-                    done: true
+                handle.addMessage({
+                    messageId: Date.now(),
+                    type: 'SYSTEM',
+                    content: `[Error] ${errText}`,
+                    createdAt: new Date().toISOString(),
                 })
             } catch {
                 // ignore

@@ -1,4 +1,5 @@
-import {chatClient, ChatSession} from "../chat-client/ChatClient";
+import {aimoClient} from "../aimo-client/AimoClient";
+import type {ChatSession} from "../aimo-client/AimoClientModel";
 import {HistoryEntry, HistoryService} from "./HistoryService";
 
 export class HistoryServiceImpl implements HistoryService {
@@ -7,7 +8,7 @@ export class HistoryServiceImpl implements HistoryService {
     private cachedHistory: HistoryEntry[] | null = null;
 
     async fetchHistory(): Promise<HistoryEntry[]> {
-        const sessions = await chatClient.getChatSessions()
+        const sessions = await aimoClient.getChatSessions()
         const hist = sessions.map((session: ChatSession) => {
             return {
                 id: session.chatId,

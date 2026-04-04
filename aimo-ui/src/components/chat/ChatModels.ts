@@ -1,6 +1,7 @@
-import {ChatMessage} from "../../services/chat-client/ChatClient";
+import type {ChatMessage} from "../../services/aimo-client/AimoClientModel";
 
 export interface Message {
     message: ChatMessage
     expandThinking: boolean
+    expandTool: boolean
 }

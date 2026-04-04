@@ -1,10 +1,26 @@
-import {Callback, ChatClient, ChatRequest, ChatMessage, NewChatResponse, ChatSession, ChatSessionUpdateRequest} from "./ChatClient";
-import { alertService } from "../alert-service/AlertService";
+import {
+    ChatCallback,
+    ChatHistoryRequest,
+    ChatRequest,
+    ChatResponse,
+    ChatSession, ChatSessionUpdateRequest,
+    NewChatResponse
+} from "./AimoClientModel";
+const CONTROLLER_CHAT = "/aimo-api/chat"
+const CONTROLLER_HISTORY = "/aimo-api/history"
+const CONTROLLER_SESSION = "/aimo-api/session"
 
-const CHAT = "/chat"
-const CHAT_SESSION = "/chat-session"
+export interface AimoClient {
+    chat: (chatId: string, request: ChatRequest, callback: ChatCallback) => Promise<ChatResponse | null>
+    getHistory: (chatId: string) => Promise<ChatHistoryRequest[]>
+    createChatSession: () => Promise<NewChatResponse>
+    getChatSessions: () => Promise<ChatSession[]>
+    updateChatSession: (chatId: string, request: ChatSessionUpdateRequest) => Promise<void>
+    deleteChatSession: (chatId: string) => Promise<void>
+}
 
-export class ChatClientImpl implements ChatClient {
+class AimoClientImpl implements AimoClient {
+
     private readonly baseUrl: string;
 
     constructor(baseUrl: string) {
@@ -15,36 +31,31 @@ export class ChatClientImpl implements ChatClient {
     chat = (
         chatId: string,
         request: ChatRequest,
-        callback?: Callback
-    ) => this.POST(CHAT, `/${chatId}`, { 'Content-Type': 'application/json' }, request).then(async res => {
+        callback: ChatCallback
+    ) => this.POST(CONTROLLER_CHAT, `/${chatId}`, { 'Content-Type': 'application/json' }, request).then(async res => {
         if (!res.body) {
             // No stream support; try to parse whole body as JSON
             const txt = await res.text()
 
             const parsed = JSON.parse(txt)
 
-            return parsed as ChatMessage
+            return parsed as ChatResponse
         }
 
         const reader = res.body.getReader()
         const decoder = new TextDecoder()
         let buffer = ''
-        let lastEvent: ChatMessage = null;
+        let lastEvent: ChatResponse | null = null;
 
         const emitJson = (jsonStr: string) => {
             if (!jsonStr) return
             try {
-                const response = JSON.parse(jsonStr) as ChatMessage
+                const response = JSON.parse(jsonStr) as ChatResponse
 
                 lastEvent = response
                 callback?.onMessage(response)
             } catch {
-                // TODO add an error callback?
-                // If it isn't a structured MessageEvent, send raw string
-                const ev: ChatMessage = { id: -1, role: "SYSTEM", response: jsonStr, thinking: '', done: true, timestamp: Date.now()}
-
-                lastEvent = ev
-                callback?.onMessage(ev)
+                // TODO error
             }
         }
 
@@ -118,29 +129,22 @@ export class ChatClientImpl implements ChatClient {
         return lastEvent
     })
 
-    getChatHistory = (
+    getHistory = (
         chatId: string
-    ) => this.GET(CHAT, `/${chatId}`).then(async res => {
-        if(!res.ok) {
-            let msg: string = ''
-            if(res.status === 404) {
-                // no history yet
-                msg = `Chat session not found: ${chatId}`
-            } else {
-                msg = `Failed to fetch chat history: ${res.status} ${res.statusText}`
-            }
-            alertService.error(msg)
-            throw new Error(msg)
+    ) => this.GET(CONTROLLER_HISTORY, `/${chatId}`).then(async res => {
+        if (!res.ok) {
+            throw new Error(`failed to fetch chat history: ${res.status} ${res.statusText}`)
         }
 
         const txt = await res.text()
         const parsed = JSON.parse(txt)
-        return parsed as ChatMessage[]
+
+        return parsed as ChatHistoryRequest[]
     })
 
-    createChatSession = () => this.POST(CHAT_SESSION, "/").then(async res => {
+    createChatSession = () => this.POST(CONTROLLER_SESSION, "/").then(async res => {
         if(!res.ok) {
-            throw new Error(`Failed to create new chat: ${res.status} ${res.statusText}`)
+            throw new Error(`failed to create new session: ${res.status} ${res.statusText}`)
         }
 
         const txt = await res.text()
@@ -149,7 +153,19 @@ export class ChatClientImpl implements ChatClient {
         return parsed as NewChatResponse
     })
 
-    getChatSessions = () => this.GET(CHAT_SESSION, "/").then(async res => {
+    deleteChatSession = (
+        chatId: string
+    ) => this.DELETE(CONTROLLER_SESSION, `/${chatId}`).then(async res => {
+        if(!res.ok) {
+            throw new Error(`failed to delete session: ${res.status} ${res.statusText}`)
+        }
+    })
+
+    getChatSessions = () => this.GET(CONTROLLER_SESSION, "/").then(async res => {
+        if(!res.ok) {
+            throw new Error(`failed to get session: ${res.status} ${res.statusText}`)
+        }
+
         const txt = await res.text()
         const parsed = JSON.parse(txt)
 
@@ -159,19 +175,11 @@ export class ChatClientImpl implements ChatClient {
     updateChatSession = (
         chatId: string,
         request: ChatSessionUpdateRequest
-    ) => this.POST(CHAT_SESSION, `/${chatId}`, undefined, request).then(async res => {
-        if(!res.ok) {
-            throw new Error(`Failed to fetch chat history: ${res.status} ${res.statusText}`)
+    ) => this.POST(CONTROLLER_SESSION, `/${chatId}`, undefined, request).then(async res => {
+        if (!res.ok) {
+            throw new Error(`failed to update session: ${res.status} ${res.statusText}`)
         }
     })
-    deleteChatSession = (
-        chatId: string
-    ) => this.DELETE(CHAT_SESSION, `/${chatId}`).then(async res => {
-        if(!res.ok) {
-            throw new Error(`Failed to fetch chat history: ${res.status} ${res.statusText}`)
-        }
-    })
-
 
     private createUrl(controller: string, path: string): string {
         return `${this.baseUrl}${controller}${path}`;
@@ -217,3 +225,5 @@ export class ChatClientImpl implements ChatClient {
         })
     }
 }
+
+export const aimoClient: AimoClient = new AimoClientImpl('http://localhost:8080')

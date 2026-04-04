@@ -2,8 +2,10 @@ package org.ivcode.aimo.ui.chatcontroller
 
 import org.ivcode.aimo.core.controller.ChatController
 import org.ivcode.aimo.core.controller.SystemMessage
+import org.ivcode.aimo.core.controller.SystemMessageContext
 import org.ivcode.aimo.core.controller.Tool
 import org.ivcode.aimo.core.util.getSessionClient
+import org.ivcode.aimo.server.extentions.getTitle
 import org.ivcode.aimo.server.extentions.setTitle
 import org.springframework.ai.chat.model.ToolContext
 
@@ -11,8 +13,8 @@ import org.springframework.ai.chat.model.ToolContext
 class TitleChatController {
 
     @SystemMessage
-    fun titleSystemMessage(currentTitle: String?): String  = """
-        The current title is ${currentTitle ?: "not set"}. If the title is not appropriate, you can change it using
+    fun titleSystemMessage(context: SystemMessageContext): String  = """
+        The current title is ${context.getSessionClient()?.getTitle() ?: "not set"}. If the title is not appropriate, you can change it using
         the setTitle tool."
     """.trimIndent()
 

@@ -3,13 +3,52 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeSanitize from 'rehype-sanitize'
 import './Chat.css'
-import {ChatMessage} from "../../services/chat-client/ChatClient";
+import type {ChatMessage} from "../../services/aimo-client/AimoClientModel";
 import {Message} from "./ChatModels";
 import Loader from "../loader/Loader"
 import TipsAndUpdatesOutlined from '@mui/icons-material/TipsAndUpdatesOutlined';
+import ConstructionOutlined from '@mui/icons-material/ConstructionOutlined';
 import {Button} from "@mui/material";
 import {useTheme} from "@mui/material/styles";
 import {UnsetCountCaller} from "../../utils/UnsetCountCaller";
+
+/**
+ * Stable row identity. The API uses the same messageId for USER and ASSISTANT within one request
+ * (both 1, both 2, …), so the key must include role/type as well as requestId.
+ */
+function chatRowKey(msg: ChatMessage): string {
+    if (msg.requestId != null) {
+        return `${msg.requestId}:${msg.messageId}:${msg.type}`
+    }
+    return `L:${msg.messageId}`
+}
+
+function typeSortOrder(type: ChatMessage['type']): number {
+    switch (type) {
+        case 'USER':
+            return 0
+        case 'SYSTEM':
+            return 1
+        case 'ASSISTANT':
+            return 2
+        case 'TOOL':
+            return 3
+        default:
+            return 9
+    }
+}
+
+function sortKeyChatOrder(msg: ChatMessage): [number, number, number, number] {
+    let t = 0
+    if (msg.createdAt != null) {
+        const p = Date.parse(msg.createdAt)
+        if (!Number.isNaN(p)) {
+            t = p
+        }
+    }
+    const r = msg.requestId ?? 0
+    return [t, r, msg.messageId, typeSortOrder(msg.type)]
+}
 
 /**
  * Props for the Chat component.
@@ -113,15 +152,20 @@ export type ChatHandle = {
  */
 const Chat = React.forwardRef<ChatHandle, ChatProps>(function Chat({onSend, initialMessages = []}: ChatProps, ref) {
 
+    /** Mirrors `messages` state so imperative add/append can run back-to-back before React re-renders (streaming). */
+    const messagesRef = useRef<Map<string, Message>>(new Map())
+
     /** Messages displayed in the chat */
-    const [messages, setMessages] = useState<Map<number, Message>>(() => {
-        const m = new Map<number, Message>()
+    const [messages, setMessages] = useState<Map<string, Message>>(() => {
+        const m = new Map<string, Message>()
         for (const im of initialMessages) {
-            m.set(im.id, {
+            m.set(chatRowKey(im), {
                 message: im,
-                expandThinking: false
+                expandThinking: false,
+                expandTool: false,
             })
         }
+        messagesRef.current = m
         return m
     })
 
@@ -224,14 +268,14 @@ const Chat = React.forwardRef<ChatHandle, ChatProps>(function Chat({onSend, init
     const addMessage = useCallback((msg: ChatMessage) => {
         // request a smooth scroll for this update only
         shouldScrollRef.current = true
-        setMessages(prev => {
-            const next = new Map(prev)
-            next.set(msg.id, {
-                message: msg,
-                expandThinking: false
-            })
-            return next
+        const next = new Map(messagesRef.current)
+        next.set(chatRowKey(msg), {
+            message: msg,
+            expandThinking: false,
+            expandTool: false,
         })
+        messagesRef.current = next
+        setMessages(next)
     }, [])
 
     /**
@@ -258,43 +302,49 @@ const Chat = React.forwardRef<ChatHandle, ChatProps>(function Chat({onSend, init
      *   throws an Error to surface logic mistakes early.
      */
     const appendMessage = useCallback((incoming: ChatMessage) => {
-        setMessages(prev => {
-            const next = new Map(prev)
-            const existing = next.get(incoming.id)
+        const next = new Map(messagesRef.current)
+        const key = chatRowKey(incoming)
+        const existing = next.get(key)
 
-            if (existing) {
-                const appendedThinking = incoming.thinking ? `${existing.message.thinking}${incoming.thinking}` : existing.message.thinking
-                const appendedResponse = incoming.response ? `${existing.message.response}${incoming.response}` : existing.message.response
-                next.set(incoming.id, {
-                    message: {
-                        ...existing.message,
-                        response: appendedResponse,
-                        thinking: appendedThinking,
-                        timestamp: incoming.timestamp ?? existing.message.timestamp
-                    },
-                    expandThinking: existing.expandThinking
-                })
-            } else {
-                throw new Error(`Message with id ${incoming.id} does not exist and cannot be appended to.`)
-            }
-            return next
-        })
+        if (existing) {
+            const appendedThinking = incoming.thinking ? `${existing.message.thinking ?? ''}${incoming.thinking}` : existing.message.thinking
+            const appendedContent = incoming.content ? `${existing.message.content ?? ''}${incoming.content}` : existing.message.content
+            next.set(key, {
+                message: {
+                    ...existing.message,
+                    content: appendedContent,
+                    thinking: appendedThinking,
+                    createdAt: incoming.createdAt ?? existing.message.createdAt,
+                    toolName: incoming.toolName ?? existing.message.toolName,
+                    requestId: incoming.requestId ?? existing.message.requestId,
+                },
+                expandThinking: existing.expandThinking,
+                expandTool: existing.expandTool,
+            })
+        } else {
+            // No row yet (e.g. ordering vs. stream); treat as first chunk for this messageId.
+            next.set(key, {
+                message: {...incoming},
+                expandThinking: false,
+                expandTool: false,
+            })
+        }
+        messagesRef.current = next
+        setMessages(next)
     }, [])
 
     const _setMessages = useCallback((msgs: ChatMessage[]) => {
-        // Convert the incoming array of messages into a Map keyed by message.id
-        // Preserve the order from the array (insertion order of Map)
         shouldScrollRef.current = true
-        setMessages(() => {
-            const m = new Map<number, Message>()
-            for (const msg of msgs) {
-                m.set(msg.id, {
-                    message: msg,
-                    expandThinking: false
-                })
-            }
-            return m
-        })
+        const m = new Map<string, Message>()
+        for (const msg of msgs) {
+            m.set(chatRowKey(msg), {
+                message: msg,
+                expandThinking: false,
+                expandTool: false,
+            })
+        }
+        messagesRef.current = m
+        setMessages(m)
     }, [])
 
 
@@ -338,7 +388,12 @@ const Chat = React.forwardRef<ChatHandle, ChatProps>(function Chat({onSend, init
         if (!inputEnabled) return
         if (e) e.preventDefault()
         // construct a Message and pass it to addMessage
-        const toAdd: ChatMessage = {id: Date.now(), response: input, role: 'USER', timestamp: Date.now(), done: true}
+        const toAdd: ChatMessage = {
+            messageId: Date.now(),
+            type: 'USER',
+            content: input,
+            createdAt: new Date().toISOString(),
+        }
         addMessage(toAdd)
         setInput('')
         if (toAdd && onSend) onSend(toAdd)
@@ -352,8 +407,14 @@ const Chat = React.forwardRef<ChatHandle, ChatProps>(function Chat({onSend, init
         }
     }
 
-    // create an ordered array for rendering from the Map values
-    const messageList = Array.from(messages.values())
+    const messageList = Array.from(messages.values()).sort((a, b) => {
+        const [ta, ra, ia, ua] = sortKeyChatOrder(a.message)
+        const [tb, rb, ib, ub] = sortKeyChatOrder(b.message)
+        if (ta !== tb) return ta - tb
+        if (ra !== rb) return ra - rb
+        if (ia !== ib) return ia - ib
+        return ua - ub
+    })
 
     const theme = useTheme()
     return (
@@ -366,69 +427,114 @@ const Chat = React.forwardRef<ChatHandle, ChatProps>(function Chat({onSend, init
             ) : (
                 <div className="chat__list_container" ref={containerRef} style={ { marginTop: theme.mixins.toolbar.minHeight} }>
                     <div className="chat__list">
-                        {messageList.map(m => (
-                            <div key={m.message.id}
-                                 className={`chat__message ${m.message.role === 'USER' ? 'user' : 'assistant'}`}>
+                        {messageList.map(m => {
+                            const msg = m.message
+                            const isUser = msg.type === 'USER'
+                            const isTool = msg.type === 'TOOL'
+                            const rowClass =
+                                isUser ? 'user' : isTool ? 'tool' : 'assistant'
 
-                                {m.message.thinking && m.message.thinking !== '' ? (
-                                    // show thinking bubble only if non-empty
-                                    <div className="chat__thinking_bubble">
-                                        <div
-                                            className="title"
-                                            role="button"
-                                            tabIndex={0}
-                                            aria-expanded={m.expandThinking}
-                                            onClick={() => {
-                                                const id = m.message.id
-                                                setMessages(prev => {
-                                                    const next = new Map(prev)
-                                                    const existing = next.get(id)
-                                                    if (existing) {
-                                                        next.set(id, {
-                                                            ...existing,
-                                                            expandThinking: !existing.expandThinking
-                                                        })
+                            const rowKey = chatRowKey(msg)
+
+                            const toggleThinking = () => {
+                                const next = new Map(messagesRef.current)
+                                const existing = next.get(rowKey)
+                                if (existing) {
+                                    next.set(rowKey, {
+                                        ...existing,
+                                        expandThinking: !existing.expandThinking,
+                                    })
+                                    messagesRef.current = next
+                                    setMessages(next)
+                                }
+                            }
+
+                            const toggleTool = () => {
+                                const next = new Map(messagesRef.current)
+                                const existing = next.get(rowKey)
+                                if (existing) {
+                                    next.set(rowKey, {
+                                        ...existing,
+                                        expandTool: !existing.expandTool,
+                                    })
+                                    messagesRef.current = next
+                                    setMessages(next)
+                                }
+                            }
+
+                            return (
+                                <div key={rowKey} className={`chat__message ${rowClass}`}>
+
+                                    {!isTool && msg.thinking && msg.thinking !== '' ? (
+                                        <div className="chat__thinking_bubble">
+                                            <div
+                                                className="title"
+                                                role="button"
+                                                tabIndex={0}
+                                                aria-expanded={m.expandThinking}
+                                                onClick={toggleThinking}
+                                                onKeyDown={(e: React.KeyboardEvent<HTMLDivElement>) => {
+                                                    if (e.key === 'Enter' || e.key === ' ') {
+                                                        e.preventDefault()
+                                                        toggleThinking()
                                                     }
-                                                    return next
-                                                })
-                                            }}
-                                            onKeyDown={(e: React.KeyboardEvent<HTMLDivElement>) => {
-                                                if (e.key === 'Enter' || e.key === ' ') {
-                                                    e.preventDefault()
-                                                    const id = m.message.id
-                                                    setMessages(prev => {
-                                                        const next = new Map(prev)
-                                                        const existing = next.get(id)
-                                                        if (existing) {
-                                                            next.set(id, {
-                                                                ...existing,
-                                                                expandThinking: !existing.expandThinking
-                                                            })
-                                                        }
-                                                        return next
-                                                    })
-                                                }
-                                            }}
-                                        >
-                                            <div className="icon"><TipsAndUpdatesOutlined sx={{ fontSize: 20 }}/></div>
-                                            <div className="text"><b>Thinking</b></div>
-                                        </div>
+                                                }}
+                                            >
+                                                <div className="icon"><TipsAndUpdatesOutlined sx={{ fontSize: 20 }}/></div>
+                                                <div className="text"><b>Thinking</b></div>
+                                            </div>
 
-                                        <div className={`body ${m.expandThinking ? 'body--visible' : 'body--hidden'}`}
-                                             aria-hidden={!m.expandThinking}>
-                                            <div className="body__content">{m.message.thinking}</div>
+                                            <div className={`body ${m.expandThinking ? 'body--visible' : 'body--hidden'}`}
+                                                 aria-hidden={!m.expandThinking}>
+                                                <div className="body__content">{msg.thinking}</div>
+                                            </div>
                                         </div>
+                                    ) : null}
+
+                                    {isTool ? (
+                                        <div className="chat__tool_bubble">
+                                            <div
+                                                className="title"
+                                                role="button"
+                                                tabIndex={0}
+                                                aria-expanded={m.expandTool}
+                                                onClick={toggleTool}
+                                                onKeyDown={(e: React.KeyboardEvent<HTMLDivElement>) => {
+                                                    if (e.key === 'Enter' || e.key === ' ') {
+                                                        e.preventDefault()
+                                                        toggleTool()
+                                                    }
+                                                }}
+                                            >
+                                                <div className="icon"><ConstructionOutlined sx={{ fontSize: 20 }}/></div>
+                                                <div className="text">
+                                                    <b>Tool</b>
+                                                    {msg.toolName ? ` · ${msg.toolName}` : ''}
+                                                </div>
+                                            </div>
+
+                                            <div className={`body ${m.expandTool ? 'body--visible' : 'body--hidden'}`}
+                                                 aria-hidden={!m.expandTool}>
+                                                <pre className="chat__tool_pre">{msg.content ?? ''}</pre>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="chat__bubble">
+                                            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
+                                                {msg.content ?? ''}
+                                            </ReactMarkdown>
+                                        </div>
+                                    )}
+
+                                    <div className="chat__time">
+                                        {(msg.createdAt != null && !Number.isNaN(Date.parse(msg.createdAt))
+                                            ? new Date(msg.createdAt)
+                                            : new Date()
+                                        ).toLocaleTimeString()}
                                     </div>
-                                ) : null}
-
-                                <div className="chat__bubble">
-                                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
-                                        {m.message.response}
-                                    </ReactMarkdown>
                                 </div>
-                                <div className="chat__time">{new Date(m.message.timestamp).toLocaleTimeString()}</div>
-                            </div>
-                        ))}
+                            )
+                        })}
                         <Loader visible={busy}/>
                     </div>
                 </div>
