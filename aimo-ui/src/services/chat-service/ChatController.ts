@@ -52,8 +52,8 @@ function streamTextDeltas(
     return { deltaContent, deltaThinking }
 }
 
-function streamAccKey(responseId: string, messageId: number): string {
-    return `${responseId}:${messageId}`
+function streamAccKey(responseId: string, msg: ChatMessage): string {
+    return `${responseId}:${msg.messageId}:${msg.type}`
 }
 
 export class ChatController {
@@ -143,7 +143,7 @@ export class ChatController {
 
                     const responseId = resp.responseId
                     for (const apiMsg of list) {
-                        const accKey = streamAccKey(responseId, apiMsg.messageId)
+                        const accKey = streamAccKey(responseId, apiMsg)
                         let acc = streamAccByRequestAndMessage.get(accKey)
                         if (!acc) {
                             acc = { content: '', thinking: '' }

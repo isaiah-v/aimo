@@ -5,7 +5,6 @@ import org.ivcode.aimo.core.AimoChatMessage
 import org.ivcode.aimo.core.AimoChatMessageType
 import org.ivcode.aimo.core.AimoChatRequest
 import org.ivcode.aimo.core.AimoChatResponse
-import org.ivcode.aimo.core.AimoSession
 import org.ivcode.aimo.core.AimoSessionClient
 import org.ivcode.aimo.core.PromptFactory
 import org.ivcode.aimo.core.client.chat.utils.toChatResponse
@@ -40,19 +39,20 @@ internal class AimoChatClientImpl (
     private val toolCallbacks: Map<String, ToolCallback> = tools.associateBy { it.toolDefinition.name() }
 
     override fun chat(request: AimoChatRequest): AimoChatResponse {
-        return doChat(request, this::call)
+        return doChat(request, null, this::call)
     }
 
     override fun chatStream (
         request: AimoChatRequest,
         callback: (AimoChatResponse) -> Unit
     ): AimoChatResponse {
-        return doChat(request) { r, m, p -> stream(r, m, p, callback) }
+        return doChat(request, callback) { r, m, p -> stream(r, m, p, callback) }
     }
 
     private fun doChat (
         request: AimoChatRequest,
-        call: (responseId: UUID, messageId: Int, prompt: Prompt) -> ChatResponse
+        callback: ((AimoChatResponse) -> Unit)? = null,
+        call: (responseId: UUID, messageId: Int, prompt: Prompt) -> ChatResponse,
     ): AimoChatResponse {
         val historyEntities = dao.getMessages(chatId)
         val history = historyEntities.map { it.toAimoChatMessage() }
@@ -94,13 +94,14 @@ internal class AimoChatClientImpl (
                     val toolCallback = toolCallbacks[toolCall.name]
                     if (toolCallback != null) {
                         val toolResponse = toolCallback.call(toolCall.arguments, toolContext)
-                        messages.add(
-                            createToolMessage(
-                                messageId = messageId(messageStartId, messages),
-                                content = toolResponse,
-                                toolName = toolCall.name,
-                            )
+                        val message = createToolMessage(
+                            messageId = messageId(messageStartId, messages),
+                            content = toolResponse,
+                            toolName = toolCall.name,
                         )
+
+                        messages.add(message)
+                        callback?.onMessage(responseId, message)
                     }
                 }
             }
@@ -210,5 +211,14 @@ internal class AimoChatClientImpl (
         return this.doOnNext { r ->
             callback.invoke(r.toAimoStreamResponse(responseId, messageId))
         }
+    }
+
+    fun ((AimoChatResponse)->Unit).onMessage(responseId: UUID, message: AimoChatMessage) {
+        invoke(AimoChatResponse(
+            chatId = chatId,
+            responseId = responseId,
+            messages = listOf(message),
+            createdAt = Instant.now(),
+        ))
     }
 }

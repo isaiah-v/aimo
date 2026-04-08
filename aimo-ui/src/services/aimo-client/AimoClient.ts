@@ -28,6 +28,29 @@ class AimoClientImpl implements AimoClient {
         this.baseUrl = baseUrl.replace(/\/+$/, '');
     }
 
+    private toDate(value: unknown): Date {
+        if (value instanceof Date) return value
+        if (typeof value === 'string' || typeof value === 'number') {
+            const d = new Date(value)
+            if (!Number.isNaN(d.getTime())) return d
+        }
+        return new Date(0)
+    }
+
+    private normalizeChatResponse(raw: ChatResponse): ChatResponse {
+        return {
+            ...raw,
+            createdAt: this.toDate((raw as { createdAt?: unknown }).createdAt),
+        }
+    }
+
+    private normalizeHistoryRequest(raw: ChatHistoryRequest): ChatHistoryRequest {
+        return {
+            ...raw,
+            createdAt: this.toDate((raw as { createdAt?: unknown }).createdAt),
+        }
+    }
+
     chat = (
         chatId: string,
         request: ChatRequest,
@@ -39,7 +62,7 @@ class AimoClientImpl implements AimoClient {
 
             const parsed = JSON.parse(txt)
 
-            return parsed as ChatResponse
+            return this.normalizeChatResponse(parsed as ChatResponse)
         }
 
         const reader = res.body.getReader()
@@ -50,7 +73,7 @@ class AimoClientImpl implements AimoClient {
         const emitJson = (jsonStr: string) => {
             if (!jsonStr) return
             try {
-                const response = JSON.parse(jsonStr) as ChatResponse
+                const response = this.normalizeChatResponse(JSON.parse(jsonStr) as ChatResponse)
 
                 lastEvent = response
                 callback?.onMessage(response)
@@ -137,9 +160,9 @@ class AimoClientImpl implements AimoClient {
         }
 
         const txt = await res.text()
-        const parsed = JSON.parse(txt)
+        const parsed = JSON.parse(txt) as ChatHistoryRequest[]
 
-        return parsed as ChatHistoryRequest[]
+        return parsed.map((req) => this.normalizeHistoryRequest(req))
     })
 
     createChatSession = () => this.POST(CONTROLLER_SESSION, "/").then(async res => {
