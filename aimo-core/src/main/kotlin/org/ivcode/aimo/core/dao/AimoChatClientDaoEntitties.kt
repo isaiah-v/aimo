@@ -10,17 +10,16 @@ data class ChatSessionEntity (
 
 data class ChatRequestEntity (
     val chatId: UUID,
-    val requestId: Int,
-    val messages: List<ChatMessageEntity>
+    val requestId: UUID,
+    val messages: List<ChatMessageEntity>,
+    val createdAt: Instant,
 )
 
 data class ChatMessageEntity (
-    val chatId: UUID,
-    val requestId: Int,
+    val requestId: UUID,
     val messageId: Int,
     val type: String,
     val content: String?,
     val thinking: String?,
     val toolName: String?,
-    val createdAt: Instant,
 )

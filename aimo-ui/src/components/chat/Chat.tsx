@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeSanitize from 'rehype-sanitize'
 import './Chat.css'
-import type {ChatMessage} from "../../services/aimo-client/AimoClientModel";
+import type {ChatMessage, ChatResponse} from "../../services/aimo-client/AimoClientModel";
 import {Message} from "./ChatModels";
 import Loader from "../loader/Loader"
 import TipsAndUpdatesOutlined from '@mui/icons-material/TipsAndUpdatesOutlined';
@@ -16,9 +16,9 @@ import {UnsetCountCaller} from "../../utils/UnsetCountCaller";
  * Stable row identity. The API uses the same messageId for USER and ASSISTANT within one request
  * (both 1, both 2, …), so the key must include role/type as well as requestId.
  */
-function chatRowKey(msg: ChatMessage): string {
-    if (msg.requestId != null) {
-        return `${msg.requestId}:${msg.messageId}:${msg.type}`
+function chatRowKey(res: ChatResponse, msg: ChatMessage): string {
+    if (res.responseId != null) {
+        return `${res.responseId}:${msg.messageId}:${msg.type}`
     }
     return `L:${msg.messageId}`
 }
@@ -38,16 +38,17 @@ function typeSortOrder(type: ChatMessage['type']): number {
     }
 }
 
-function sortKeyChatOrder(msg: ChatMessage): [number, number, number, number] {
+function sortKeyChatOrder(m: Message): [number, number, number] {
     let t = 0
-    if (msg.createdAt != null) {
-        const p = Date.parse(msg.createdAt)
+    if (m.response.createdAt != null) {
+        const p = m.response.createdAt instanceof Date 
+            ? m.response.createdAt.getTime() 
+            : Date.parse(m.response.createdAt as any)
         if (!Number.isNaN(p)) {
             t = p
         }
     }
-    const r = msg.requestId ?? 0
-    return [t, r, msg.messageId, typeSortOrder(msg.type)]
+    return [t, m.message.messageId, typeSortOrder(m.message.type)]
 }
 
 /**
@@ -56,13 +57,12 @@ function sortKeyChatOrder(msg: ChatMessage): [number, number, number, number] {
  * @property onSend Optional callback that is invoked when the *user* explicitly
  * submits a message via the UI (click Send / Enter).
  *
- *
- * @property initialMessages Optional pre-seeded messages to populate the chat.
+ * @property initialResponses Optional pre-seeded responses to populate the chat.
  * These are added into the internal Map on mount (keeps insertion order).
  */
 interface ChatProps {
     onSend?: (msg: ChatMessage) => void
-    initialMessages?: ChatMessage[]
+    initialResponses?: ChatResponse[]
 }
 
 /**
@@ -70,60 +70,47 @@ interface ChatProps {
  *
  * Purpose:
  * - Describes the methods a parent can call on the Chat component instance.
- * - Intended for programmatic control from a parent (e.g. adding a message,
+ * - Intended for programmatic control from a parent (e.g. adding a response,
  *   appending streaming text to an existing message).
  *
- * Usage (parent):
- * const chatRef = useRef<ChatHandle | null>(null)
- * // insert a new message
- * chatRef.current?.addMessage({ id: Date.now(), text: 'Hello', sender: 'assistant', time: Date.now() })
- * // append streaming text to an existing message by id
- * chatRef.current?.updateMessage({ id: existingId, text: ' more chunk', sender: 'assistant', time: Date.now() })
- *
  * Notes for callers (behavioral contract):
- * - `addMessage` is used to insert a new message object into the chat. It is the
- *   correct method to call when you want a message to appear as a distinct item
- *   (for example, when creating a placeholder before streaming).
- * - `updateMessage` is used to append additional text to an already-existing
- *   message identified by `incoming.id` (typical streaming/partial-update use
- *   case). Callers must ensure the target message exists first.
- * - These signatures document the public API and do not expose internal
- *   implementation details; rely on the behavioral contract above when using them.
+ * - `addResponse` is used to insert an entire ChatResponse object into the chat.
+ *   It extracts all messages from the response and displays them.
+ * - `appendMessage` is used to append additional text to an already-existing
+ *   message identified by response context (streaming/partial-update use case).
+ *   Callers must ensure the target message exists first.
  */
 export type ChatHandle = {
     busy: () => (() => void)
     disableInput: () => (() => void)
 
     /**
-     * Append text to an existing message.
+     * Append text to an existing message within a response.
      *
      * What to use it for:
-     * - Streaming responses that arrive in chunks: create a message (via `addMessage`)
+     * - Streaming responses that arrive in chunks: create a response (via `addResponse`)
      *   then repeatedly call `appendMessage` to append each chunk to that message.
      *
      * Caller expectations:
-     * - `incoming.id` must match an existing message previously inserted.
-     * - `incoming.text` contains the piece to append (the exact concatenation
-     *   semantics are part of the component's contract; callers provide only the text).
+     * - `response` is the ChatResponse containing the message.
+     * - `incoming.messageId` identifies which message within that response.
+     * - `incoming.content` and `incoming.thinking` contain the pieces to append.
      */
-    appendMessage: (incoming: ChatMessage) => void
+    appendMessage: (response: ChatResponse, incoming: ChatMessage) => void
 
     /**
-     * Insert a new message object into the chat.
+     * Insert a new ChatResponse into the chat.
      *
      * What to use it for:
-     * - Programmatically adding a message that should appear in the chat UI.
-     * - Creating a placeholder message before streaming updates are appended.
+     * - Programmatically adding a complete response with all its messages.
+     * - Each message in the response will be displayed in the chat UI.
      *
      * Caller expectations:
-     * - Provide a `Message` object (id/time/sender may be supplied or left to be
-     *   populated by the caller/component depending on your integration).
-     * - This method is the correct entry-point for adding new messages from code;
-     *   it is distinct from the component's UI submit flow.
+     * - Provide a complete `ChatResponse` object with all its messages.
      */
-    addMessage: (msg: ChatMessage) => void
+    addResponse: (response: ChatResponse) => void
 
-    setMessages: (msgs: ChatMessage[]) => void
+    setResponses: (responses: ChatResponse[]) => void
 }
 
 /**
@@ -133,24 +120,15 @@ export type ChatHandle = {
  * - Renders a chat UI and provides a programmatic API to the parent via a forwarded ref.
  *
  * Props summary (passed via the function parameters below):
- * - `onSend?: (msg: Message) => void` — optional callback invoked when the *user* submits a message from the UI.
- * - `initialMessages?: Message[]` — optional array of messages used to seed the chat on mount.
+ * - `onSend?: (msg: ChatMessage) => void` — optional callback invoked when the *user* submits a message from the UI.
+ * - `initialResponses?: ChatResponse[]` — optional array of responses used to seed the chat on mount.
  *
  * Ref/API:
  * - The component forwards a ref whose type is `ChatHandle`. The parent can call methods
- *   on that handle (for example `addMessage` to insert a message or `appendMessage`
+ *   on that handle (for example `addResponse` to insert a response or `appendMessage`
  *   to stream/append text to an existing message).
- *
- * Usage (parent):
- * ```ts
- * const chatRef = useRef<ChatHandle | null>(null)
- * <Chat ref={chatRef} onSend={handleSend} initialMessages={seed} />
- * // programmatically add:
- * chatRef.current?.addMessage({ id: 123, text: 'Hello', sender: 'assistant', time: Date.now() })
- * // append to existing:
- * chatRef.current?.appendMessage({ id: 123, text: ' more chunk', sender: 'assistant', time: Date.now() })
  */
-const Chat = React.forwardRef<ChatHandle, ChatProps>(function Chat({onSend, initialMessages = []}: ChatProps, ref) {
+const Chat = React.forwardRef<ChatHandle, ChatProps>(function Chat({onSend, initialResponses = []}: ChatProps, ref) {
 
     /** Mirrors `messages` state so imperative add/append can run back-to-back before React re-renders (streaming). */
     const messagesRef = useRef<Map<string, Message>>(new Map())
@@ -158,12 +136,15 @@ const Chat = React.forwardRef<ChatHandle, ChatProps>(function Chat({onSend, init
     /** Messages displayed in the chat */
     const [messages, setMessages] = useState<Map<string, Message>>(() => {
         const m = new Map<string, Message>()
-        for (const im of initialMessages) {
-            m.set(chatRowKey(im), {
-                message: im,
-                expandThinking: false,
-                expandTool: false,
-            })
+        for (const response of initialResponses) {
+            for (const msg of response.messages) {
+                m.set(chatRowKey(response, msg), {
+                    response: response,
+                    message: msg,
+                    expandThinking: false,
+                    expandTool: false,
+                })
+            }
         }
         messagesRef.current = m
         return m
@@ -242,88 +223,100 @@ const Chat = React.forwardRef<ChatHandle, ChatProps>(function Chat({onSend, init
 
 
     /**
-     * Insert a Message object into the chat state.
+     * Insert an entire ChatResponse into the chat state.
      *
      * Purpose / When to use:
-     * - Use this method to programmatically add a message to the chat UI.
-     * - Typical uses include creating a placeholder message (e.g. before streaming content)
-     *   or inserting messages received from an external source.
+     * - Use this method to programmatically add a complete response to the chat UI.
+     * - Each message within the response will be displayed.
      *
      * Parameter:
-     * @param msg - A Message object describing the message to insert. Callers may
-     *              provide an object containing at least `text`. Other fields (id, sender, time)
-     *              can be provided by the caller when available.
+     * @param response - A ChatResponse object containing all messages to display.
      *
      * Caller expectations:
-     * - Callers should provide the message text (`msg.text`). If your integration
-     *   supplies an id/time/sender, include them; otherwise the component will
-     *   accept the provided object as the canonical message to render.
-     * - This function is for local insertion of messages into the component's state;
-     *   it is distinct from the component's UI submit flow. If you need to notify
-     *   an external service (send to a server), do so from the caller as appropriate.
+     * - Provide a complete `ChatResponse` object with all its messages populated.
      *
      * Return:
-     * - This callback does not return a value; it enqueues the message into the chat state.
+     * - This callback does not return a value; it enqueues the response into the chat state.
      */
-    const addMessage = useCallback((msg: ChatMessage) => {
+    const addResponse = useCallback((response: ChatResponse) => {
         // request a smooth scroll for this update only
         shouldScrollRef.current = true
         const next = new Map(messagesRef.current)
-        next.set(chatRowKey(msg), {
-            message: msg,
-            expandThinking: false,
-            expandTool: false,
-        })
+        for (const msg of response.messages) {
+            next.set(chatRowKey(response, msg), {
+                response: response,
+                message: msg,
+                expandThinking: false,
+                expandTool: false,
+            })
+        }
         messagesRef.current = next
         setMessages(next)
     }, [])
 
     /**
-     * Append additional text to an existing message by id.
+     * Create a user message and add it as a single-message response.
+     *
+     * Purpose:
+     * - Used when the user submits a message from the UI.
+     */
+    const addMessage = useCallback((msg: ChatMessage) => {
+        // Create a minimal response wrapper for the message
+        const response: ChatResponse = {
+            chatId: '',
+            responseId: `local-${Date.now()}`,
+            messages: [msg],
+            createdAt: new Date(),
+        }
+        addResponse(response)
+    }, [addResponse])
+
+    /**
+     * Append additional text to an existing message within a response.
      *
      * Purpose:
      * - Used for streaming or partial updates where new content arrives in chunks
      *   and should be appended to an already-rendered message.
      *
      * Parameters:
-     * @param incoming - A Message object containing at minimum the `id` of the
-     *                   target message and the `text` to append.
+     * @param response - The ChatResponse containing the message to append to.
+     * @param incoming - A ChatMessage object containing the `messageId` of the
+     *                   target message and the `content`/`thinking` to append.
      *
      * Caller expectations / contract:
-     * - `incoming.id` must refer to an existing message previously inserted
-     *   via `addMessage` (or otherwise present in the chat). The caller is
-     *   responsible for creating that initial message before appending.
-     * - The `text` provided will be appended to the existing message's text.
+     * - `response` and `messageId` must refer to an existing message previously inserted
+     *   via `addResponse`. The caller is responsible for creating that initial message before appending.
+     * - The `content` and `thinking` provided will be appended to the existing message's text.
      * - This operation intentionally does NOT trigger an automatic scroll.
      *
      * Behavior notes:
      * - The implementation merges text by concatenation.
      * - If no message exists with the provided id, the current implementation
-     *   throws an Error to surface logic mistakes early.
+     *   treats it as a new message.
      */
-    const appendMessage = useCallback((incoming: ChatMessage) => {
+    const appendMessage = useCallback((response: ChatResponse, incoming: ChatMessage) => {
         const next = new Map(messagesRef.current)
-        const key = chatRowKey(incoming)
+        const key = chatRowKey(response, incoming)
         const existing = next.get(key)
 
         if (existing) {
             const appendedThinking = incoming.thinking ? `${existing.message.thinking ?? ''}${incoming.thinking}` : existing.message.thinking
             const appendedContent = incoming.content ? `${existing.message.content ?? ''}${incoming.content}` : existing.message.content
             next.set(key, {
+                response: existing.response,
                 message: {
                     ...existing.message,
                     content: appendedContent,
                     thinking: appendedThinking,
-                    createdAt: incoming.createdAt ?? existing.message.createdAt,
                     toolName: incoming.toolName ?? existing.message.toolName,
-                    requestId: incoming.requestId ?? existing.message.requestId,
                 },
                 expandThinking: existing.expandThinking,
                 expandTool: existing.expandTool,
             })
         } else {
-            // No row yet (e.g. ordering vs. stream); treat as first chunk for this messageId.
+            // No row yet; add it with the provided response
             next.set(key, {
+                response: response,
                 message: {...incoming},
                 expandThinking: false,
                 expandTool: false,
@@ -333,15 +326,18 @@ const Chat = React.forwardRef<ChatHandle, ChatProps>(function Chat({onSend, init
         setMessages(next)
     }, [])
 
-    const _setMessages = useCallback((msgs: ChatMessage[]) => {
+    const _setResponses = useCallback((responses: ChatResponse[]) => {
         shouldScrollRef.current = true
         const m = new Map<string, Message>()
-        for (const msg of msgs) {
-            m.set(chatRowKey(msg), {
-                message: msg,
-                expandThinking: false,
-                expandTool: false,
-            })
+        for (const response of responses) {
+            for (const msg of response.messages) {
+                m.set(chatRowKey(response, msg), {
+                    response: response,
+                    message: msg,
+                    expandThinking: false,
+                    expandTool: false,
+                })
+            }
         }
         messagesRef.current = m
         setMessages(m)
@@ -364,25 +360,25 @@ const Chat = React.forwardRef<ChatHandle, ChatProps>(function Chat({onSend, init
      * Expose the component's imperative API to a parent via `ref`.
      *
      * Exposed methods (ChatHandle):
-     * - updateMessage: append/update an existing message by id.
-     *   Usage: parentRef.current?.updateMessage({ id, text, ... })
+     * - addResponse: insert a new response and all its messages into the chat.
+     *   Usage: parentRef.current?.addResponse({ responseId, messages, ... })
      *
-     * - addMessage: insert a new message into the chat.
-     *   Usage: parentRef.current?.addMessage({ id?, text, sender?, time? })
+     * - appendMessage: append/update an existing message within a response.
+     *   Usage: parentRef.current?.appendMessage({ messageId, requestId, content, ... })
      *
      * Contract & notes for callers:
-     * - Call `addMessage` to create a new chat item (e.g. a placeholder before streaming).
-     * - Call `updateMessage` to append partial/streamed text to an already-created message.
+     * - Call `addResponse` to add a complete response with all its messages.
+     * - Call `appendMessage` to append partial/streamed text to an already-created message.
      * - The parent can call these through a ref typed as `ChatHandle`.
      * - The dependency array ensures the handle is updated if the internal callbacks change.
      */
     useImperativeHandle(ref, () => ({
         appendMessage: appendMessage,
-        addMessage: addMessage,
-        setMessages: _setMessages,
+        addResponse: addResponse,
+        setResponses: _setResponses,
         disableInput: () => inputEnabledCounter.current.doSet(),
         busy: () => busyCounter.current.doSet(),
-    }), [appendMessage, addMessage, _setMessages, inputEnabledCounter, busyCounter])
+    }), [appendMessage, addResponse, _setResponses, inputEnabledCounter, busyCounter])
 
     function handleSubmit(e?: React.FormEvent) {
         if (!inputEnabled) return
@@ -392,7 +388,6 @@ const Chat = React.forwardRef<ChatHandle, ChatProps>(function Chat({onSend, init
             messageId: Date.now(),
             type: 'USER',
             content: input,
-            createdAt: new Date().toISOString(),
         }
         addMessage(toAdd)
         setInput('')
@@ -408,10 +403,9 @@ const Chat = React.forwardRef<ChatHandle, ChatProps>(function Chat({onSend, init
     }
 
     const messageList = Array.from(messages.values()).sort((a, b) => {
-        const [ta, ra, ia, ua] = sortKeyChatOrder(a.message)
-        const [tb, rb, ib, ub] = sortKeyChatOrder(b.message)
+        const [ta, ia, ua] = sortKeyChatOrder(a)
+        const [tb, ib, ub] = sortKeyChatOrder(b)
         if (ta !== tb) return ta - tb
-        if (ra !== rb) return ra - rb
         if (ia !== ib) return ia - ib
         return ua - ub
     })
@@ -427,14 +421,19 @@ const Chat = React.forwardRef<ChatHandle, ChatProps>(function Chat({onSend, init
             ) : (
                 <div className="chat__list_container" ref={containerRef} style={ { marginTop: theme.mixins.toolbar.minHeight} }>
                     <div className="chat__list">
-                        {messageList.map(m => {
+                        {messageList.map((m, index) => {
                             const msg = m.message
                             const isUser = msg.type === 'USER'
                             const isTool = msg.type === 'TOOL'
                             const rowClass =
                                 isUser ? 'user' : isTool ? 'tool' : 'assistant'
 
-                            const rowKey = chatRowKey(msg)
+                            const rowKey = chatRowKey(m.response, msg)
+
+                            // Show timestamp only on the last message of each response group
+                            const isLastInGroup =
+                                index === messageList.length - 1 ||
+                                messageList[index + 1].response.responseId !== m.response.responseId
 
                             const toggleThinking = () => {
                                 const next = new Map(messagesRef.current)
@@ -526,12 +525,14 @@ const Chat = React.forwardRef<ChatHandle, ChatProps>(function Chat({onSend, init
                                         </div>
                                     )}
 
-                                    <div className="chat__time">
-                                        {(msg.createdAt != null && !Number.isNaN(Date.parse(msg.createdAt))
-                                            ? new Date(msg.createdAt)
-                                            : new Date()
-                                        ).toLocaleTimeString()}
-                                    </div>
+                                    {isLastInGroup && (
+                                        <div className="chat__time">
+                                            {(m.response.createdAt != null && !Number.isNaN(Date.parse(m.response.createdAt as any))
+                                                ? new Date(m.response.createdAt as any)
+                                                : new Date()
+                                            ).toLocaleTimeString()}
+                                        </div>
+                                    )}
                                 </div>
                             )
                         })}

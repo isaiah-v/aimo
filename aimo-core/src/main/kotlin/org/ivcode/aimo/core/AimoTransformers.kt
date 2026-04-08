@@ -13,6 +13,7 @@ internal fun ChatRequestEntity.toAimoHistoryRequest(): AimoHistoryRequest = Aimo
     chatId = chatId,
     requestId = requestId,
     messages = messages.map { it.toAimoChatMessage() },
+    createdAt = createdAt
 )
 
 private fun ChatMessageEntity.toAimoChatMessage() = AimoChatMessage (
@@ -21,7 +22,6 @@ private fun ChatMessageEntity.toAimoChatMessage() = AimoChatMessage (
     content = content,
     thinking = thinking,
     toolName = toolName,
-    createdAt = createdAt
 )
 
 private fun String.toAimoChatMessageType(): AimoChatMessageType = when(this) {

@@ -41,6 +41,16 @@ interface AimoSessionClient {
     fun createChatClient(): AimoChatClient
 
     /**
+     * Append chat messages to this session's conversation history.
+     *
+     * Implementations should persist the messages to the session's backing store and update any
+     * in-memory/session cache so subsequent reads reflect the appended history.
+     *
+     * @param messages messages to append, in the order they should appear in the conversation
+     */
+    fun addMessages(messages: List<AimoChatMessage>)
+
+    /**
      * Return metadata from the in-memory/session cache (fast, may be stale).
      */
     fun getMetadata(): Map<String, Any>

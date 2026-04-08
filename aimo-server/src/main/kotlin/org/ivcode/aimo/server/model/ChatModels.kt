@@ -10,8 +10,9 @@ data class ChatRequest (
 
 data class ChatResponse (
     val chatId: UUID,
-    val responseId: Int,
-    val messages: List<ChatMessage>
+    val responseId: UUID,
+    val messages: List<ChatMessage>,
+    val createdAt: Instant,
 )
 
 data class ChatMessage (
@@ -19,8 +20,7 @@ data class ChatMessage (
     val type: Role,
     val content: String?,
     val thinking: String?,
-    val toolName: String?,
-    val createdAt: Instant,
+    val toolName: String?
 ) {
     enum class Role {
         USER,
@@ -32,6 +32,7 @@ data class ChatMessage (
 
 data class ChatHistoryRequest (
     val chatId: UUID,
-    val requestId: Int,
-    val messages: List<ChatMessage>
+    val requestId: UUID,
+    val messages: List<ChatMessage>,
+    val createdAt: Instant,
 )

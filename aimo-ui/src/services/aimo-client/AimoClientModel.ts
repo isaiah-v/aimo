@@ -5,8 +5,9 @@ export interface ChatRequest {
 
 export interface ChatResponse {
     chatId: string,
-    responseId: number,
+    responseId: string,
     messages: ChatMessage[],
+    createdAt: Date,
 }
 
 export type MessageType = 'USER' | 'ASSISTANT' | 'SYSTEM' | 'TOOL';
@@ -17,15 +18,13 @@ export interface ChatMessage {
     content?: string,
     thinking?: string,
     toolName?: string,
-    createdAt?: string,
-    /** Exchange round from the API (history request id / stream response id). With messageId + type forms a stable row key (USER and ASSISTANT often share messageId within one request). */
-    requestId?: number,
 }
 
 export interface ChatHistoryRequest {
     chatId: string,
-    requestId: number,
+    requestId: string,
     messages: ChatMessage[],
+    createdAt: Date,
 }
 
 export interface NewChatResponse {

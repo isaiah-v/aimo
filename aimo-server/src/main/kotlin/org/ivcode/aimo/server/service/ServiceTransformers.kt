@@ -20,7 +20,8 @@ internal fun ChatRequest.toAimoChatRequest(context: Map<String, Any> = emptyMap(
 internal fun AimoChatResponse.toChatResponse(): ChatResponse = ChatResponse (
     chatId = chatId,
     responseId = responseId,
-    messages = messages.map { it.toChatMessage() }
+    messages = messages.map { it.toChatMessage() },
+    createdAt = createdAt
 )
 
 internal fun AimoChatMessage.toChatMessage() = ChatMessage(
@@ -28,8 +29,7 @@ internal fun AimoChatMessage.toChatMessage() = ChatMessage(
     type = type.toRole(),
     content = content,
     thinking = thinking,
-    toolName = toolName,
-    createdAt = createdAt
+    toolName = toolName
 )
 
 internal fun AimoChatMessageType.toRole(): ChatMessage.Role = when (this) {
@@ -42,7 +42,8 @@ internal fun AimoChatMessageType.toRole(): ChatMessage.Role = when (this) {
 internal fun AimoHistoryRequest.toChatHistoryRequest() = ChatHistoryRequest(
     chatId = chatId,
     requestId = requestId,
-    messages = messages.map { it.toChatMessage() }
+    messages = messages.map { it.toChatMessage() },
+    createdAt = createdAt
 )
 
 internal fun AimoSession.toChatSession() = ChatSession(

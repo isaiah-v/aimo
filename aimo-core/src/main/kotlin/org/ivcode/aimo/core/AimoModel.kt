@@ -21,8 +21,9 @@ enum class AimoChatMessageType {
 
 data class AimoChatResponse (
     val chatId: UUID,
-    val responseId: Int,
+    val responseId: UUID,
     val messages: List<AimoChatMessage>,
+    val createdAt: Instant,
 )
 
 data class AimoChatMessage (
@@ -31,7 +32,6 @@ data class AimoChatMessage (
     val content: String?,
     val thinking: String?,
     val toolName: String?,
-    val createdAt: Instant,
 )
 
 data class AimoChatRequest (
@@ -41,8 +41,9 @@ data class AimoChatRequest (
 
 data class AimoHistoryRequest (
     val chatId: UUID,
-    val requestId: Int,
+    val requestId: UUID,
     val messages: List<AimoChatMessage>,
+    val createdAt: Instant,
 )
 
 data class AimoSession (

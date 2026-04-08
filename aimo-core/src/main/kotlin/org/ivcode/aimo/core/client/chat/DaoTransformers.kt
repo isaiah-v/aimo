@@ -6,17 +6,14 @@ import org.ivcode.aimo.core.dao.ChatMessageEntity
 import java.util.UUID
 
 internal fun AimoChatMessage.toChatMessageEntity(
-    chatId: UUID,
-    responseId: Int
+    responseId: UUID
 ) = ChatMessageEntity (
-    chatId = chatId,
     requestId = responseId,
     messageId = messageId,
     type = type.name,
     content = content,
     thinking = thinking,
     toolName = toolName,
-    createdAt = createdAt,
 )
 
 internal fun ChatMessageEntity.toAimoChatMessage() = AimoChatMessage(
@@ -25,5 +22,4 @@ internal fun ChatMessageEntity.toAimoChatMessage() = AimoChatMessage(
     content = content,
     thinking = thinking,
     toolName = toolName,
-    createdAt = createdAt,
 )

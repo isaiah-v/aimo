@@ -1,6 +1,7 @@
 package org.ivcode.aimo.core.client.session
 
 import org.ivcode.aimo.core.AimoChatClient
+import org.ivcode.aimo.core.AimoChatMessage
 import org.ivcode.aimo.core.AimoSessionClient
 import org.ivcode.aimo.core.PromptFactory
 import org.ivcode.aimo.core.client.chat.AimoChatClientImpl
@@ -32,6 +33,10 @@ internal class AimoSessionClientImpl (
             tools = tools,
             systemMessages = systemMessages,
         )
+    }
+
+    override fun addMessages(messages: List<AimoChatMessage>) {
+        TODO()
     }
 
     override fun getMetadata(): Map<String, Any> {
