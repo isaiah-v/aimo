@@ -27,17 +27,8 @@ export interface ChatHistoryRequest {
     createdAt: Date,
 }
 
-export interface NewChatResponse {
-    chatId: string,
-}
-
 export interface ChatSession {
     chatId: string,
-    title?: string,
-}
-
-export interface ChatSessionUpdateRequest {
-    title: string,
 }
 
 export interface ChatCallback {

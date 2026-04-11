@@ -48,5 +48,4 @@ internal fun AimoHistoryRequest.toChatHistoryRequest() = ChatHistoryRequest(
 
 internal fun AimoSession.toChatSession() = ChatSession(
     chatId = chatId,
-    title = metadata["title"] as? String
 )

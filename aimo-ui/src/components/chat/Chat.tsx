@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeSanitize from 'rehype-sanitize'
 import './Chat.css'
-import type {ChatMessage, ChatResponse} from "../../services/aimo-client/AimoClientModel";
+import type {ChatMessage, ChatResponse} from "../../api/aimo-client/AimoClientModel";
 import {Message} from "./ChatModels";
 import Loader from "../loader/Loader"
 import TipsAndUpdatesOutlined from '@mui/icons-material/TipsAndUpdatesOutlined';

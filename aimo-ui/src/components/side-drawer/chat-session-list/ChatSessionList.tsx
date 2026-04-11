@@ -13,7 +13,8 @@ import {
     Tooltip
 } from "@mui/material";
 import {History as HistoryIcon, DeleteForever as DeleteForeverIcon, Edit as EditIcon} from "@mui/icons-material";
-import {aimoClient} from "../../../services/aimo-client/AimoClient";
+import {aimoClient} from "../../../api/aimo-client/AimoClient";
+import {aimoUiClient} from "../../../api/aimo-ui-client/AimoUiClient";
 
 export interface ChatSessionListProps {
     drawerOpen?: boolean;
@@ -54,7 +55,7 @@ export default function ChatSessionList(props: ChatSessionListProps) {
     }
 
     const onEditSessionTitle = async (id: string, newTitle: string) => {
-        await aimoClient.updateChatSession(id, { title: newTitle });
+        await aimoUiClient.setTitle(id, newTitle);
         void historyService.fetchHistory()
     }
 

@@ -5,10 +5,13 @@ import org.ivcode.aimo.core.AimoChatMessage
 import org.ivcode.aimo.core.AimoSessionClient
 import org.ivcode.aimo.core.PromptFactory
 import org.ivcode.aimo.core.client.chat.AimoChatClientImpl
+import org.ivcode.aimo.core.client.chat.toChatMessageEntity
 import org.ivcode.aimo.core.controller.SystemMessageCallback
 import org.ivcode.aimo.core.dao.AimoChatClientDao
+import org.ivcode.aimo.core.dao.ChatRequestEntity
 import org.springframework.ai.chat.model.ChatModel
 import org.springframework.ai.tool.ToolCallback
+import java.time.Instant
 import java.util.UUID
 
 internal class AimoSessionClientImpl (
@@ -36,7 +39,19 @@ internal class AimoSessionClientImpl (
     }
 
     override fun addMessages(messages: List<AimoChatMessage>) {
-        TODO()
+        if(messages.isEmpty()) {
+            throw IllegalArgumentException("AimoSessionClientImpl addMessages should have at least one message")
+        }
+
+        val requestId = UUID.randomUUID()
+        dao.addChatRequest(
+            ChatRequestEntity(
+                chatId = chatId,
+                requestId = requestId,
+                messages = messages.map { it.toChatMessageEntity(requestId) },
+                createdAt = Instant.now(),
+            )
+        )
     }
 
     override fun getMetadata(): Map<String, Any> {

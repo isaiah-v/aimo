@@ -1,5 +1,6 @@
 package org.ivcode.aimo.server.controller
 
+import org.ivcode.aimo.server.consts.API_CONTROLLER_CONTEXT
 import org.ivcode.aimo.server.model.ChatRequest
 import org.ivcode.aimo.server.service.ChatService
 import org.slf4j.LoggerFactory
@@ -14,7 +15,7 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 import java.util.UUID
 
 @RestController
-@RequestMapping("/aimo-api/chat")
+@RequestMapping("/$API_CONTROLLER_CONTEXT/chat")
 class ChatController (
     private val chatClientService: ChatService
 ) {

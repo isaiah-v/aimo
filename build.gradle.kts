@@ -1,4 +1,3 @@
-
 plugins {
 	id("io.spring.dependency-management") version "1.1.7" apply false
 }
@@ -38,6 +37,18 @@ subprojects {
 	// management DSL while still centralizing the BOM configuration.
 	apply(from = rootProject.file("gradle/spring-ai-bom.gradle"))
 
+	// Centralized dependency versions. Subprojects can declare dependencies
+	// without a version (e.g. implementation("group:artifact")) and the version
+	// will be resolved from the table below.
+	configurations.configureEach {
+		resolutionStrategy.eachDependency {
+			when ("${requested.group}:${requested.name}") {
+				// add entries here:
+				"org.springdoc:springdoc-openapi-starter-webmvc-ui" -> useVersion("3.0.2")
+			}
+		}
+	}
+
 	// Configure Java toolchain for subprojects that apply the Java plugin.
 	// This will only run in projects that actually apply the 'java' plugin,
 	// so projects that don't apply it will be skipped.
@@ -65,5 +76,6 @@ subprojects {
 			}
 		}
 	}
-}
 
+
+}

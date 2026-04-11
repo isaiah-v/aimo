@@ -1,5 +1,5 @@
-import {aimoClient} from '../aimo-client/AimoClient'
-import type {ChatHistoryRequest, ChatMessage, ChatResponse} from '../aimo-client/AimoClientModel'
+import {aimoClient} from '../../api/aimo-client/AimoClient'
+import type {ChatHistoryRequest, ChatMessage, ChatResponse} from '../../api/aimo-client/AimoClientModel'
 import type {ChatHandle} from '../../components/chat/Chat'
 import React from "react";
 import {chatSession} from "../chat-session-service/ChatSession";

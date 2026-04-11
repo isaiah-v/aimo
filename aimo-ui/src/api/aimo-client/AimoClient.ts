@@ -3,9 +3,10 @@ import {
     ChatHistoryRequest,
     ChatRequest,
     ChatResponse,
-    ChatSession, ChatSessionUpdateRequest,
-    NewChatResponse
+    ChatSession
 } from "./AimoClientModel";
+import {ApiClient} from "../api-client/ApiClient";
+
 const CONTROLLER_CHAT = "/aimo-api/chat"
 const CONTROLLER_HISTORY = "/aimo-api/history"
 const CONTROLLER_SESSION = "/aimo-api/session"
@@ -13,19 +14,16 @@ const CONTROLLER_SESSION = "/aimo-api/session"
 export interface AimoClient {
     chat: (chatId: string, request: ChatRequest, callback: ChatCallback) => Promise<ChatResponse | null>
     getHistory: (chatId: string) => Promise<ChatHistoryRequest[]>
-    createChatSession: () => Promise<NewChatResponse>
+    createChatSession: () => Promise<ChatSession>
     getChatSessions: () => Promise<ChatSession[]>
-    updateChatSession: (chatId: string, request: ChatSessionUpdateRequest) => Promise<void>
     deleteChatSession: (chatId: string) => Promise<void>
 }
 
-class AimoClientImpl implements AimoClient {
-
-    private readonly baseUrl: string;
+class AimoClientImpl extends ApiClient implements AimoClient {
 
     constructor(baseUrl: string) {
         // remove trailing slash(es) if present
-        this.baseUrl = baseUrl.replace(/\/+$/, '');
+        super(baseUrl)
     }
 
     private toDate(value: unknown): Date {
@@ -55,7 +53,7 @@ class AimoClientImpl implements AimoClient {
         chatId: string,
         request: ChatRequest,
         callback: ChatCallback
-    ) => this.POST(CONTROLLER_CHAT, `/${chatId}`, { 'Content-Type': 'application/json' }, request).then(async res => {
+    ) => this.POST(CONTROLLER_CHAT, `/${encodeURIComponent(chatId)}`, { 'Content-Type': 'application/json' }, request).then(async res => {
         if (!res.body) {
             // No stream support; try to parse whole body as JSON
             const txt = await res.text()
@@ -154,7 +152,7 @@ class AimoClientImpl implements AimoClient {
 
     getHistory = (
         chatId: string
-    ) => this.GET(CONTROLLER_HISTORY, `/${chatId}`).then(async res => {
+    ) => this.GET(CONTROLLER_HISTORY, `/${encodeURIComponent(chatId)}`).then(async res => {
         if (!res.ok) {
             throw new Error(`failed to fetch chat history: ${res.status} ${res.statusText}`)
         }
@@ -173,12 +171,12 @@ class AimoClientImpl implements AimoClient {
         const txt = await res.text()
         const parsed = JSON.parse(txt)
 
-        return parsed as NewChatResponse
+        return parsed as ChatSession
     })
 
     deleteChatSession = (
         chatId: string
-    ) => this.DELETE(CONTROLLER_SESSION, `/${chatId}`).then(async res => {
+    ) => this.DELETE(CONTROLLER_SESSION, `/${encodeURIComponent(chatId)}`).then(async res => {
         if(!res.ok) {
             throw new Error(`failed to delete session: ${res.status} ${res.statusText}`)
         }
@@ -195,58 +193,6 @@ class AimoClientImpl implements AimoClient {
         return parsed as ChatSession[]
     })
 
-    updateChatSession = (
-        chatId: string,
-        request: ChatSessionUpdateRequest
-    ) => this.POST(CONTROLLER_SESSION, `/${chatId}`, undefined, request).then(async res => {
-        if (!res.ok) {
-            throw new Error(`failed to update session: ${res.status} ${res.statusText}`)
-        }
-    })
-
-    private createUrl(controller: string, path: string): string {
-        return `${this.baseUrl}${controller}${path}`;
-    }
-
-    private async POST (
-        controller: string,
-        path: string,
-        headers?: HeadersInit,
-        body?: any
-    ): Promise<Response> {
-        return this.request('POST', controller, path, headers, JSON.stringify(body))
-    }
-
-    private async GET (
-        controller: string,
-        path: string,
-        headers?: HeadersInit
-    ): Promise<Response> {
-        return this.request('GET', controller, path, headers)
-    }
-
-    private async DELETE (
-        controller: string,
-        path: string,
-        headers?: HeadersInit
-    ): Promise<Response> {
-        return this.request('DELETE', controller, path, headers)
-    }
-
-    private async request (
-        method: string,
-        controller: string,
-        path: string,
-        headers?: HeadersInit,
-        body?: BodyInit
-    ): Promise<Response> {
-        const url = this.createUrl(controller, path)
-        return fetch(url, {
-            method: method,
-            headers: { 'Content-Type': 'application/json', ...headers },
-            body: body
-        })
-    }
 }
 
 export const aimoClient: AimoClient = new AimoClientImpl('http://localhost:8080')

@@ -1,4 +1,4 @@
-import type {ChatMessage, ChatResponse} from "../../services/aimo-client/AimoClientModel";
+import type {ChatMessage, ChatResponse} from "../../api/aimo-client/AimoClientModel";
 
 export interface Message {
     response: ChatResponse
