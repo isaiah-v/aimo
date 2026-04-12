@@ -5,10 +5,10 @@ import org.ivcode.aimo.core.AimoChatMessage
 import org.ivcode.aimo.core.AimoSessionClient
 import org.ivcode.aimo.core.PromptFactory
 import org.ivcode.aimo.core.client.chat.AimoChatClientImpl
-import org.ivcode.aimo.core.client.chat.toChatMessageEntity
 import org.ivcode.aimo.core.controller.SystemMessageCallback
 import org.ivcode.aimo.core.dao.AimoChatClientDao
 import org.ivcode.aimo.core.dao.ChatRequestEntity
+import org.ivcode.aimo.core.toChatMessageEntity
 import org.springframework.ai.chat.model.ChatModel
 import org.springframework.ai.tool.ToolCallback
 import java.time.Instant

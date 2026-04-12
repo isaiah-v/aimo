@@ -18,6 +18,7 @@ export interface ChatMessage {
     content?: string,
     thinking?: string,
     toolName?: string,
+    done?: boolean,
 }
 
 export interface ChatHistoryRequest {
@@ -31,6 +32,21 @@ export interface ChatSession {
     chatId: string,
 }
 
+/**
+ * Streaming callback contract for chat requests.
+ *
+ * Event order:
+ * 1) `onResponseChunk` fires for each complete parsed response object from the stream.
+ * 2) `onMessageComplete` fires when a single message reaches `done === true`.
+ *    The payload is a `ChatResponse` wrapper with a single fully accumulated
+ *    message and includes `chatId`, `responseId`, and `createdAt`.
+ * 3) `onComplete` fires once after stream parsing/accumulation finishes.
+ */
 export interface ChatCallback {
-    onMessage: (response: ChatResponse) => void,
+    /** Raw normalized response chunk emitted as soon as it is parsed. */
+    onResponseChunk?: (response: ChatResponse) => void,
+    /** Single-message response emitted once when that message becomes done. */
+    onMessageComplete?: (response: ChatResponse) => void,
+    /** Final accumulated response emitted once after stream completion. */
+    onComplete?: (response: ChatResponse) => void,
 }

@@ -15,6 +15,7 @@ import {
 import {History as HistoryIcon, DeleteForever as DeleteForeverIcon, Edit as EditIcon} from "@mui/icons-material";
 import {aimoClient} from "../../../api/aimo-client/AimoClient";
 import {aimoUiClient} from "../../../api/aimo-ui-client/AimoUiClient";
+import {chatService} from "../../../services/chat-service/ChatService";
 
 export interface ChatSessionListProps {
     drawerOpen?: boolean;
@@ -38,6 +39,13 @@ export default function ChatSessionList(props: ChatSessionListProps) {
         // when chatSession updates, update local state
         return chatSession.onChange(async (id: string | null) => {
             setSessionId(id);
+        })
+    }, []);
+    useEffect(() => {
+        return chatService.subscribe((message) => {
+            if (message.type === 'TOOL' && message.toolName === 'setTitle') {
+                void historyService.fetchHistory()
+            }
         })
     }, []);
 

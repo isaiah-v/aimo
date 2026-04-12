@@ -20,7 +20,8 @@ data class ChatMessage (
     val type: Role,
     val content: String?,
     val thinking: String?,
-    val toolName: String?
+    val toolName: String?,
+    val done: Boolean?,
 ) {
     enum class Role {
         USER,

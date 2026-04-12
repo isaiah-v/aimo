@@ -81,6 +81,7 @@ class TitleChatController(
                 content = objectMapper.writeValueAsString(response),
                 thinking = null,
                 toolName = TITLE_TOOL_NAME,
+                done = true
             )
         ))
 

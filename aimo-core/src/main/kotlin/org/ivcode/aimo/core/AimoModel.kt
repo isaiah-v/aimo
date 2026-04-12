@@ -32,6 +32,7 @@ data class AimoChatMessage (
     val content: String?,
     val thinking: String?,
     val toolName: String?,
+    val done: Boolean?,
 )
 
 data class AimoChatRequest (

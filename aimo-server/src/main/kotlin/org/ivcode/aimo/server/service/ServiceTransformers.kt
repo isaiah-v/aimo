@@ -29,7 +29,8 @@ internal fun AimoChatMessage.toChatMessage() = ChatMessage(
     type = type.toRole(),
     content = content,
     thinking = thinking,
-    toolName = toolName
+    toolName = toolName,
+    done = done,
 )
 
 internal fun AimoChatMessageType.toRole(): ChatMessage.Role = when (this) {

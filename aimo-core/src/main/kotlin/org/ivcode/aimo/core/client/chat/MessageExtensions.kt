@@ -2,6 +2,7 @@ package org.ivcode.aimo.core.client.chat
 
 import org.ivcode.aimo.core.AimoChatMessage
 import org.ivcode.aimo.core.AimoChatMessageType
+import sun.font.GlyphLayout.done
 import java.time.Instant
 
 internal fun createUserMessage (
@@ -14,6 +15,7 @@ internal fun createUserMessage (
     content = content,
     thinking = null,
     toolName = null,
+    done = true,
 )
 
 internal fun createToolMessage (
@@ -27,19 +29,22 @@ internal fun createToolMessage (
     content = content,
     thinking = null,
     toolName = toolName,
+    done = true,
 )
 
 internal fun createAssistantMessage (
     messageId: Int,
     type: AimoChatMessageType = AimoChatMessageType.ASSISTANT,
     content: String?,
-    thinking: String?
+    thinking: String?,
+    done: Boolean?,
 ) = AimoChatMessage(
     messageId = messageId,
     type = type,
     content = content,
     thinking = thinking,
     toolName = null,
+    done = done,
 )
 
 internal fun createSystemMessage (
@@ -52,4 +57,5 @@ internal fun createSystemMessage (
     content = content,
     thinking = null,
     toolName = null,
+    done = true,
 )

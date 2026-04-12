@@ -5,7 +5,9 @@ import {
     ChatResponse,
     ChatSession
 } from "./AimoClientModel";
+import { normalizeChatResponse, normalizeHistoryRequest } from "./AimoClientNormalizers";
 import {ApiClient} from "../api-client/ApiClient";
+import {ResponseBuilder} from "./ResponseBuilder";
 
 const CONTROLLER_CHAT = "/aimo-api/chat"
 const CONTROLLER_HISTORY = "/aimo-api/history"
@@ -26,29 +28,6 @@ class AimoClientImpl extends ApiClient implements AimoClient {
         super(baseUrl)
     }
 
-    private toDate(value: unknown): Date {
-        if (value instanceof Date) return value
-        if (typeof value === 'string' || typeof value === 'number') {
-            const d = new Date(value)
-            if (!Number.isNaN(d.getTime())) return d
-        }
-        return new Date(0)
-    }
-
-    private normalizeChatResponse(raw: ChatResponse): ChatResponse {
-        return {
-            ...raw,
-            createdAt: this.toDate((raw as { createdAt?: unknown }).createdAt),
-        }
-    }
-
-    private normalizeHistoryRequest(raw: ChatHistoryRequest): ChatHistoryRequest {
-        return {
-            ...raw,
-            createdAt: this.toDate((raw as { createdAt?: unknown }).createdAt),
-        }
-    }
-
     chat = (
         chatId: string,
         request: ChatRequest,
@@ -57,97 +36,31 @@ class AimoClientImpl extends ApiClient implements AimoClient {
         if (!res.body) {
             // No stream support; try to parse whole body as JSON
             const txt = await res.text()
-
-            const parsed = JSON.parse(txt)
-
-            return this.normalizeChatResponse(parsed as ChatResponse)
+            return normalizeChatResponse(JSON.parse(txt) as ChatResponse)
         }
 
         const reader = res.body.getReader()
         const decoder = new TextDecoder()
-        let buffer = ''
-        let lastEvent: ChatResponse | null = null;
+        const builder = new ResponseBuilder(
+            (response) => callback?.onResponseChunk?.(response),
+            (response) => callback?.onMessageComplete?.(response),
+        )
 
-        const emitJson = (jsonStr: string) => {
-            if (!jsonStr) return
-            try {
-                const response = this.normalizeChatResponse(JSON.parse(jsonStr) as ChatResponse)
-
-                lastEvent = response
-                callback?.onMessage(response)
-            } catch {
-                // TODO error
-            }
-        }
-
-        // Read stream chunks and attempt two strategies:
-        // 1) NDJSON / newline-delimited objects
-        // 2) Concatenated JSON objects using brace counting with basic string/escape handling
         let done = false
         while (!done) {
             const { value, done: streamDone } = await reader.read()
-            done = !!streamDone
-            buffer += value ? decoder.decode(value, { stream: true }) : ''
-
-            // Handle newline-delimited objects first
-            let nlIndex: number
-            while ((nlIndex = buffer.indexOf('\n')) >= 0) {
-                const line = buffer.slice(0, nlIndex).trim()
-                buffer = buffer.slice(nlIndex + 1)
-                if (line) emitJson(line)
-            }
-
-            // Attempt to extract concatenated objects from remaining buffer
-            // Basic state machine to handle strings and escapes so braces inside strings don't break parsing
-            let braceDepth = 0
-            let inString = false
-            let escape = false
-            let start = -1
-            for (let i = 0; i < buffer.length; i++) {
-                const ch = buffer[i]
-                if (escape) {
-                    escape = false
-                    continue
-                }
-                if (ch === '\\') {
-                    escape = true
-                    continue
-                }
-                if (ch === '"' ) {
-                    inString = !inString
-                    continue
-                }
-                if (inString) continue
-                if (ch === '{') {
-                    if (braceDepth === 0) start = i
-                    braceDepth++
-                } else if (ch === '}') {
-                    braceDepth--
-                    if (braceDepth === 0 && start >= 0) {
-                        const objStr = buffer.slice(start, i + 1)
-                        emitJson(objStr)
-                        buffer = buffer.slice(i + 1)
-                        // reset scanner to beginning of new buffer
-                        i = -1
-                        start = -1
-                    }
-                }
+            done = streamDone
+            if (value) {
+                const chunk = decoder.decode(value, { stream: true })
+                builder.push(chunk)
             }
         }
 
-        // After stream end, try to parse any leftover content
-        const leftover = buffer.trim()
-        if (leftover) {
-            // Try newline split first, then fallback to single JSON parse
-            const parts = leftover.split('\n').map(p => p.trim()).filter(Boolean)
-            if (parts.length > 1) {
-                parts.forEach(emitJson)
-            } else {
-                emitJson(leftover)
-            }
+        builder.flush()
+        if (builder.last) {
+            callback?.onComplete?.(builder.last)
         }
-
-        return lastEvent
+        return builder.last
     })
 
     getHistory = (
@@ -160,7 +73,7 @@ class AimoClientImpl extends ApiClient implements AimoClient {
         const txt = await res.text()
         const parsed = JSON.parse(txt) as ChatHistoryRequest[]
 
-        return parsed.map((req) => this.normalizeHistoryRequest(req))
+        return parsed.map((req) => normalizeHistoryRequest(req))
     })
 
     createChatSession = () => this.POST(CONTROLLER_SESSION, "/").then(async res => {

@@ -3,6 +3,8 @@ package org.ivcode.aimo.core
 import org.ivcode.aimo.core.dao.ChatMessageEntity
 import org.ivcode.aimo.core.dao.ChatRequestEntity
 import org.ivcode.aimo.core.dao.ChatSessionEntity
+import sun.font.GlyphLayout.done
+import java.util.UUID
 
 internal fun ChatSessionEntity.toAimoSession(): AimoSession = AimoSession (
     chatId = chatId,
@@ -16,12 +18,13 @@ internal fun ChatRequestEntity.toAimoHistoryRequest(): AimoHistoryRequest = Aimo
     createdAt = createdAt
 )
 
-private fun ChatMessageEntity.toAimoChatMessage() = AimoChatMessage (
+internal fun ChatMessageEntity.toAimoChatMessage() = AimoChatMessage (
     messageId = messageId,
     type = type.toAimoChatMessageType(),
     content = content,
     thinking = thinking,
     toolName = toolName,
+    done = true,
 )
 
 private fun String.toAimoChatMessageType(): AimoChatMessageType = when(this) {
@@ -31,3 +34,14 @@ private fun String.toAimoChatMessageType(): AimoChatMessageType = when(this) {
     "TOOL" -> AimoChatMessageType.TOOL
     else -> throw IllegalArgumentException("Unknown message type: $this")
 }
+
+internal fun AimoChatMessage.toChatMessageEntity(
+    responseId: UUID
+) = ChatMessageEntity (
+    requestId = responseId,
+    messageId = messageId,
+    type = type.name,
+    content = content,
+    thinking = thinking,
+    toolName = toolName,
+)

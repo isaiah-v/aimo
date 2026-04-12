@@ -12,6 +12,8 @@ import org.ivcode.aimo.core.controller.SystemMessageCallback
 import org.ivcode.aimo.core.controller.SystemMessageContext
 import org.ivcode.aimo.core.dao.AimoChatClientDao
 import org.ivcode.aimo.core.dao.ChatRequestEntity
+import org.ivcode.aimo.core.toAimoChatMessage
+import org.ivcode.aimo.core.toChatMessageEntity
 import org.ivcode.aimo.core.util.CONTEXT_KEY__CHAT_ID
 import org.ivcode.aimo.core.util.CONTEXT_KEY__REQUEST_ID
 import org.ivcode.aimo.core.util.CONTEXT_KEY__SESSION
@@ -22,6 +24,7 @@ import org.springframework.ai.chat.model.ToolContext
 import org.springframework.ai.chat.prompt.Prompt
 import org.springframework.ai.tool.ToolCallback
 import reactor.core.publisher.Flux
+import reactor.core.publisher.Mono
 import reactor.core.scheduler.Schedulers
 import java.time.Instant
 import java.util.UUID
@@ -77,6 +80,8 @@ internal class AimoChatClientImpl (
                 val prompt = promptFactory.create(systemMessages + history + promptMessage + messages, toolCallbacks.values.toList())
 
                 val response = call(responseId, messageId, prompt)
+                callback?.invoke(createDoneMessage(responseId, messageId))
+
                 messages.add(response.toAimoChatMessage(messageId))
 
                 response
@@ -151,14 +156,14 @@ internal class AimoChatClientImpl (
     private fun messageId(messageStartId: Int, messages: List<AimoChatMessage>): Int = messageStartId + messages.size
 
 
-    private fun ChatResponse.toAimoChatMessage(messageId: Int): AimoChatMessage {
+    private fun ChatResponse.toAimoChatMessage(messageId: Int, done: Boolean = true): AimoChatMessage {
         val thinking = result?.metadata?.get<String>("thinking")
 
         return createAssistantMessage(
             messageId = messageId,
-            type = result?.output?.messageType?.toAimoChatMessageType() ?: AimoChatMessageType.ASSISTANT,
             content = result?.output?.text,
             thinking = thinking,
+            done = done,
         )
     }
 
@@ -202,7 +207,7 @@ internal class AimoChatClientImpl (
         return AimoChatResponse(
             chatId = chatId,
             responseId = responseId,
-            messages = listOf(toAimoChatMessage(messageId)),
+            messages = listOf(toAimoChatMessage(messageId, done = false)),
             createdAt = Instant.now(),
         )
     }
@@ -212,6 +217,18 @@ internal class AimoChatClientImpl (
             callback.invoke(r.toAimoStreamResponse(responseId, messageId))
         }
     }
+
+    private fun createDoneMessage(responseId: UUID, messageId: Int) = AimoChatResponse(
+        chatId = chatId,
+        responseId = responseId,
+        messages = listOf(createAssistantMessage(
+            messageId = messageId,
+            content = null,
+            thinking = null,
+            done = true,
+        )),
+        createdAt = Instant.now(),
+    )
 
     fun ((AimoChatResponse)->Unit).onMessage(responseId: UUID, message: AimoChatMessage) {
         invoke(AimoChatResponse(
