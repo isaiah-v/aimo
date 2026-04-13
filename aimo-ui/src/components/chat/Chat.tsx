@@ -518,11 +518,13 @@ const Chat = React.forwardRef<ChatHandle, ChatProps>(function Chat({onSend, init
                                             </div>
                                         </div>
                                     ) : (
-                                        <div className="chat__bubble">
-                                            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
-                                                {msg.content ?? ''}
-                                            </ReactMarkdown>
-                                        </div>
+                                        msg.content ? (
+                                            <div className="chat__bubble">
+                                                <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
+                                                    {msg.content}
+                                                </ReactMarkdown>
+                                            </div>
+                                        ) : null
                                     )}
 
                                     {isLastInGroup && (
