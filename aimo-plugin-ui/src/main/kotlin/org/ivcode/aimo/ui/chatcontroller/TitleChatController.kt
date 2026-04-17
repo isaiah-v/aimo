@@ -55,11 +55,7 @@ class TitleChatController(
         context: ToolContext
     ): TitleResponse {
         val sessionClient = context.getSessionClient() ?: throw IllegalStateException("Title cannot be set. No session client found in context")
-        sessionClient.setTitle(title, AimoChatMessageType.ASSISTANT.name)
-        return TitleResponse(
-            title = title,
-            source = AimoChatMessageType.ASSISTANT.name
-        )
+        return setTitle(title, sessionClient, AimoChatMessageType.ASSISTANT.name)
     }
 
     /**
@@ -67,6 +63,11 @@ class TitleChatController(
      * Defaults `source` to `USER` for external user-driven title updates.
      */
     fun setTitle(title: String, sessionClient: AimoSessionClient, source: String = AimoChatMessageType.USER.name): TitleResponse {
+        val currentTitle = sessionClient.getTitle()
+        if (currentTitle?.source == AimoChatMessageType.USER.name && source == AimoChatMessageType.ASSISTANT.name) {
+            throw IllegalStateException("Cannot overwrite a USER-set title with source ASSISTANT")
+        }
+
         sessionClient.setTitle(title, source)
         val response = TitleResponse(
             title = title,

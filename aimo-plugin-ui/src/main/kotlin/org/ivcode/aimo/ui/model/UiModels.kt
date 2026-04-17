@@ -13,3 +13,8 @@ data class SessionTitle (
     val source: String,
     val title: String?,
 )
+
+data class TimeResponse (
+    val system: String,
+    val user: String?,
+)

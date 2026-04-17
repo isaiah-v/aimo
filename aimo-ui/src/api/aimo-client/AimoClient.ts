@@ -32,7 +32,15 @@ class AimoClientImpl extends ApiClient implements AimoClient {
         chatId: string,
         request: ChatRequest,
         callback: ChatCallback
-    ) => this.POST(CONTROLLER_CHAT, `/${encodeURIComponent(chatId)}`, { 'Content-Type': 'application/json' }, request).then(async res => {
+    ) => this.POST(
+        CONTROLLER_CHAT,
+        `/${encodeURIComponent(chatId)}`,
+        {
+            'Content-Type': 'application/json',
+            'X-Timezone-Offset': String(new Date().getTimezoneOffset()),
+        },
+        request,
+    ).then(async res => {
         if (!res.body) {
             // No stream support; try to parse whole body as JSON
             const txt = await res.text()

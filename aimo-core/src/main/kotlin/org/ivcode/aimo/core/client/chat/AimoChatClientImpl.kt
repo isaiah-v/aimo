@@ -98,12 +98,21 @@ internal class AimoChatClientImpl (
 
                     val toolCallback = toolCallbacks[toolCall.name]
                     if (toolCallback != null) {
-                        val toolResponse = toolCallback.call(toolCall.arguments, toolContext)
-                        val message = createToolMessage(
-                            messageId = messageId(messageStartId, messages),
-                            content = toolResponse,
-                            toolName = toolCall.name,
-                        )
+                        val message = try {
+                            val toolResponse = toolCallback.call(toolCall.arguments, toolContext)
+
+                            createToolMessage(
+                                messageId = messageId(messageStartId, messages),
+                                content = toolResponse,
+                                toolName = toolCall.name,
+                            )
+                        } catch (e: Exception) {
+                            createToolMessage(
+                                messageId = messageId(messageStartId, messages),
+                                content = "Error: ${e.message}",
+                                toolName = toolCall.name,
+                            )
+                        }
 
                         messages.add(message)
                         callback?.onMessage(responseId, message)
