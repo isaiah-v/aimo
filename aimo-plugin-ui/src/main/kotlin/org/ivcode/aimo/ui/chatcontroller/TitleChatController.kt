@@ -16,7 +16,7 @@ import org.springframework.ai.chat.model.ToolContext
 import org.springframework.ai.tool.annotation.ToolParam
 import tools.jackson.databind.ObjectMapper
 
-private const val TITLE_TOOL_NAME = "setTitle"
+private const val TITLE_TOOL_NAME = "set_title"
 
 /**
  * Handles chat title read/write behavior for both tool-driven (LLM) and user-driven updates.
@@ -36,12 +36,12 @@ class TitleChatController(
     @SystemMessage
     fun titleUpdateInstructions(): String  =
         """         
-        Use the "setTitle" tool to update the chat title when it is missing or no longer descriptive.
+        Use the "$TITLE_TOOL_NAME" tool to update the chat title when it is missing or no longer descriptive.
         Keep titles concise (ideally under 5 words), representative of the conversation, and neither too generic nor
         overly specific to one message. Update the title as the conversation evolves.
         
         A user can set the title externally. Use source "USER" for user-set titles and "ASSISTANT" for LLM-set titles.
-        Do not set or overwrite the title if it was already set by the user.
+        Do not set or overwrite the title if it was already set by the user. The user can set the title using the UI.
         """.trimIndent()
 
 
@@ -49,7 +49,7 @@ class TitleChatController(
      * Tool entrypoint used by the LLM to set a session title.
      * Returns a [TitleResponse] where `source` is `ASSISTANT`.
      */
-    @Tool(name = TITLE_TOOL_NAME, description = "Set the chat title. Returns TitleResponse JSON: { title: string, source: \"USER\" | \"ASSISTANT\" } (USER = user-set, ASSISTANT = LLM-set).")
+    @Tool(name = TITLE_TOOL_NAME, description = "Set the chat title with source=ASSISTANT. Returns TitleResponse JSON: { title: string, source: \"USER\" | \"ASSISTANT\" } (USER = user-set, ASSISTANT = LLM-set).")
     fun setTitle(
         @ToolParam(description = "The new title") title: String,
         context: ToolContext

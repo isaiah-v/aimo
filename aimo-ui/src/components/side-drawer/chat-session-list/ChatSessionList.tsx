@@ -43,7 +43,7 @@ export default function ChatSessionList(props: ChatSessionListProps) {
     }, []);
     useEffect(() => {
         return chatService.subscribe((message) => {
-            if (message.type === 'TOOL' && message.toolName === 'setTitle') {
+            if (message.type === 'TOOL' && message.toolName === 'set_title') {
                 void historyService.fetchHistory()
             }
         })

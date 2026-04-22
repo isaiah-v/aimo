@@ -8,6 +8,7 @@ import org.springframework.context.annotation.Import
 
 @Configuration
 @Import(
+    WebConfig::class,
     TitleController::class,
     TitleChatController::class,
     TimeChatController::class

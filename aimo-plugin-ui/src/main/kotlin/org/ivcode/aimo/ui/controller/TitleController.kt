@@ -12,6 +12,13 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 import java.util.UUID
 
+/**
+ * REST endpoints for reading and manually updating chat titles.
+ *
+ * This controller exists for user-driven title management outside of the LLM tool flow.
+ * When a title is updated through [setTitle], it is recorded through [TitleChatController]
+ * as a user-set title so it can be preserved from later assistant-driven title changes.
+ */
 @RestController
 @RequestMapping("/$API_CONTROLLER_CONTEXT/title")
 class TitleController constructor(
@@ -19,6 +26,7 @@ class TitleController constructor(
     private val titleChatController: TitleChatController
 ) {
 
+    /** Returns the current title metadata for a single chat session. */
     @GetMapping("/{chatId}")
     fun getTitle(
         @PathVariable chatId: UUID
@@ -27,6 +35,7 @@ class TitleController constructor(
         return titleChatController.getTitle(sessionClient)
     }
 
+    /** Returns title metadata for all sessions that currently have a stored title. */
     @GetMapping("/")
     fun getTitles(): List<SessionTitle> {
         return aimo.getSessions().mapNotNull { session ->
@@ -34,6 +43,13 @@ class TitleController constructor(
         }
     }
 
+    /**
+     * Manually sets the title for a specific chat.
+     *
+     * This endpoint is intended for user actions from the UI or other external clients.
+     * The title is stored as a user-set title, which means assistant-generated title
+     * updates should not overwrite it later.
+     */
     @PutMapping("/{chatId}/{title}")
     fun setTitle(
         @PathVariable chatId: UUID,
