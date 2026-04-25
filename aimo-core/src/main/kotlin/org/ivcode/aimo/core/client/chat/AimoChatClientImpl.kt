@@ -36,7 +36,7 @@ internal class AimoChatClientImpl (
     private val promptFactory: PromptFactory,
     tools: List<ToolCallback>,
     private val systemMessages: List<SystemMessageCallback>,
-    maxInputTokens: Int = 5000,
+    maxInputTokens: Int = 4000,
 ) : AimoChatClient {
 
     private val initialObservedPromptCharacters: Long = session.getProperty(METADATA_KEY__OBSERVED_PROMPT_CHARACTERS).toNonNegativeLong()
@@ -89,7 +89,6 @@ internal class AimoChatClientImpl (
         val systemPromptMessages = getSystemMessages(messageStartId, createSystemMessageContext(responseId, request))
 
         var response: ChatResponse? = null
-        var requestCharacters = 0
 
         // start the request loop
         while(response == null || response.hasToolCalls()) {
@@ -101,7 +100,6 @@ internal class AimoChatClientImpl (
                     prompt = promptMessage,
                     taskMessages = messages,
                     tools = toolCallbacks.values.toList(),
-                    onPromptComputed = { promptCharacters -> requestCharacters += promptCharacters },
                 ) { msgs, tools ->
                     val requestMessages = msgs.withoutThinking()
                     val prompt = promptFactory.create(
@@ -153,6 +151,14 @@ internal class AimoChatClientImpl (
         }
 
         persistTokenBudgeterCalibration()
+
+        // Compute requestCharacters from persisted messages only, counting content only (excluding thinking).
+        // This excludes system messages, history, tools, and thinking metadata which are not persisted per request.
+        val requestCharacters = (listOf(promptMessage) + messages)
+            .sumOf { msg ->
+                // Only count message content, exclude thinking
+                msg.content?.length ?: 0
+            }
 
         // write all messages, including the prompt, to the database at the end of the request loop
         dao.addChatRequest(

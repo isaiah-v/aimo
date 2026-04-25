@@ -62,7 +62,6 @@ internal class ChatInputTokenBudgeter(
         prompt: AimoChatMessage,
         taskMessages: List<AimoChatMessage>,
         tools: List<ToolCallback>,
-        onPromptComputed: ((promptCharacters: Int) -> Unit)? = null,
         block: (messages: List<AimoChatMessage>, tools: List<ToolCallback>) -> ChatResponse,
     ): ChatResponse {
         val promptPlan = createPromptPlan(
@@ -73,7 +72,6 @@ internal class ChatInputTokenBudgeter(
             tools = tools,
         )
 
-        onPromptComputed?.invoke(promptPlan.promptCharacters)
         val response = block(systemMessages + promptPlan.history + prompt + taskMessages, tools)
         recordPromptUsage(
             promptCharacters = promptPlan.promptCharacters,
