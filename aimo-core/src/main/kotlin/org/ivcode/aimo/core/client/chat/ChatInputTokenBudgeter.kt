@@ -1,0 +1,321 @@
+package org.ivcode.aimo.core.client.chat
+
+import org.ivcode.aimo.core.AimoChatMessage
+import org.springframework.ai.chat.model.ChatResponse
+import org.springframework.ai.tool.ToolCallback
+import kotlin.math.ceil
+
+/**
+ * Computes how much prior chat history can be included in a prompt while staying under
+ * a configured input token budget.
+ *
+ * Budgeting order:
+ * 1. Reserve tokens for system messages.
+ * 2. Reserve tokens for the current user prompt.
+ * 3. Reserve tokens for task messages already produced in this request loop.
+ * 4. Reserve tokens for tool definitions/schemas.
+ * 5. Fill remaining budget with the newest possible history messages.
+ *
+ * Notes:
+ * - Token estimation starts with a character-count heuristic and is refined over time
+ *   using observed prompt usage returned by the model.
+ * - Only message content is counted; non-content fields (for example, thinking metadata)
+ *   are intentionally excluded.
+ * - Tool token estimation uses explicit tool-definition fields (name/description/schema)
+ *   instead of relying on object string rendering.
+ *
+ * @property maxInputTokens Maximum allowed prompt input tokens for one model call.
+ */
+internal class ChatInputTokenBudgeter(
+    private val maxInputTokens: Int,
+    initialObservedPromptCharacters: Long = 0,
+    initialObservedPromptTokens: Long = 0,
+) {
+    private var observedPromptCharacters: Long = initialObservedPromptCharacters.coerceAtLeast(0)
+    private var observedPromptTokens: Long = initialObservedPromptTokens.coerceAtLeast(0)
+
+    data class Calibration(
+        val observedPromptCharacters: Long,
+        val observedPromptTokens: Long,
+    )
+
+    private data class PromptPlan(
+        val history: List<AimoChatMessage>,
+        val promptCharacters: Int,
+    )
+
+    /**
+     * Computes the prompt history subset, executes [block], and refines the estimator using
+     * actual prompt usage reported in the returned [ChatResponse].
+     *
+     * @param systemMessages System messages included on this model call.
+     * @param history Persisted prior conversation messages for this chat.
+     * @param prompt Current user prompt message.
+     * @param taskMessages Messages generated during the current request loop (assistant/tool).
+     * @param tools Tool callbacks available to this model call.
+     * @param block Invoked with the selected history subset to perform the model call.
+     * @return The [ChatResponse] returned by [block].
+     */
+    fun prompt(
+        systemMessages: List<AimoChatMessage>,
+        history: List<AimoChatMessage>,
+        prompt: AimoChatMessage,
+        taskMessages: List<AimoChatMessage>,
+        tools: List<ToolCallback>,
+        block: (messages: List<AimoChatMessage>, tools: List<ToolCallback>) -> ChatResponse,
+    ): ChatResponse {
+        val promptPlan = createPromptPlan(
+            systemMessages = systemMessages,
+            history = history,
+            prompt = prompt,
+            taskMessages = taskMessages,
+            tools = tools,
+        )
+
+        val response = block(systemMessages + promptPlan.history + prompt + taskMessages, tools)
+        recordPromptUsage(
+            promptCharacters = promptPlan.promptCharacters,
+            promptTokens = response.toObservedPromptTokens(),
+        )
+
+        return response
+    }
+
+    /**
+     * Returns the subset of [history] that fits in the remaining token budget after reserving
+     * tokens for [systemMessages], [prompt], [taskMessages], and [tools].
+     *
+     * History is truncated from oldest to newest by scanning newest-first and keeping as much
+     * recent context as possible.
+     *
+     * @param systemMessages System messages included on this model call.
+     * @param history Persisted prior conversation messages for this chat.
+     * @param prompt Current user prompt message.
+     * @param taskMessages Messages generated during the current request loop (assistant/tool).
+     * @param tools Tool callbacks available to this model call.
+     * @return Chronological subset of [history] that fits within the remaining input budget.
+     */
+    fun historyForPrompt(
+        systemMessages: List<AimoChatMessage>,
+        history: List<AimoChatMessage>,
+        prompt: AimoChatMessage,
+        taskMessages: List<AimoChatMessage>,
+        tools: List<ToolCallback>,
+    ): List<AimoChatMessage> {
+        return createPromptPlan(
+            systemMessages = systemMessages,
+            history = history,
+            prompt = prompt,
+            taskMessages = taskMessages,
+            tools = tools,
+        ).history
+    }
+
+    /**
+     * Updates the internal token heuristic using actual prompt token usage returned by the model.
+     *
+     * @param promptMessages Messages that were sent in the prompt.
+     * @param tools Tool callbacks included in that prompt.
+     * @param promptTokens Actual prompt tokens reported by the model response.
+     */
+    fun recordPromptUsage(
+        promptMessages: List<AimoChatMessage>,
+        tools: List<ToolCallback>,
+        promptTokens: Int,
+    ) {
+        val promptCharacters = countMessageCharacters(promptMessages) + countToolCharacters(tools)
+        recordPromptUsage(promptCharacters, promptTokens)
+    }
+
+    fun calibration(): Calibration {
+        synchronized(this) {
+            return Calibration(
+                observedPromptCharacters = observedPromptCharacters,
+                observedPromptTokens = observedPromptTokens,
+            )
+        }
+    }
+
+    /**
+     * Returns a request-character budget for DAO history lookup before token-level trimming.
+     */
+    fun maxRequestCharactersForLookup(): Int {
+        return ceil(maxInputTokens * charactersPerToken()).toInt().coerceAtLeast(0)
+    }
+
+    /**
+     * Keeps the most recent history messages that fit within [tokenBudget].
+     *
+     * @param history Candidate historical messages.
+     * @param tokenBudget Remaining token budget after non-history reservations.
+     * @return Chronological history subset constrained by [tokenBudget].
+     */
+    private fun truncateHistoryByTokens(history: List<AimoChatMessage>, tokenBudget: Int): List<AimoChatMessage> {
+        if (tokenBudget <= 0) {
+            return emptyList()
+        }
+
+        var tokenCount = 0
+        val result = mutableListOf<AimoChatMessage>()
+
+        for (message in history.asReversed()) {
+            val messageTokens = estimateTokens(message.content ?: "")
+            if (tokenCount + messageTokens > tokenBudget) {
+                break
+            }
+            result.add(message)
+            tokenCount += messageTokens
+        }
+
+        return result.asReversed()
+    }
+
+    /**
+     * Estimates total tokens from textual message content.
+     *
+     * @param messages Messages to estimate.
+     * @return Estimated aggregate token count.
+     */
+    private fun estimateMessagesTokens(messages: List<AimoChatMessage>): Int {
+        return messages.sumOf { estimateTokens(it.content ?: "") }
+    }
+
+    private fun countMessageCharacters(messages: List<AimoChatMessage>): Int {
+        return messages.sumOf { countCharacters(it.content ?: "") }
+    }
+
+    /**
+     * Estimates input cost of tool metadata sent alongside prompts.
+     *
+     * @param tools Tool callbacks included in prompt options.
+     * @return Estimated aggregate token count for tool definitions.
+     */
+    private fun estimateToolTokens(tools: List<ToolCallback>): Int {
+        return tools.sumOf { toolCallback ->
+            val toolDefinition = toolCallback.toolDefinition
+
+            // Count explicit fields serialized for tool context.
+            estimateTokens(toolDefinition.name()) +
+                estimateTokens(toolDefinition.description()) +
+                estimateTokens(toolDefinition.inputSchema())
+        }
+    }
+
+    private fun countToolCharacters(tools: List<ToolCallback>): Int {
+        return tools.sumOf { toolCallback ->
+            val toolDefinition = toolCallback.toolDefinition
+
+            countCharacters(toolDefinition.name()) +
+                countCharacters(toolDefinition.description()) +
+                countCharacters(toolDefinition.inputSchema())
+        }
+    }
+
+    /**
+     * Estimates token count for a text fragment using a simple character heuristic.
+     *
+     * @param text Input text.
+     * @return Estimated token count.
+     */
+    private fun estimateTokens(text: String): Int {
+        val characterCount = countCharacters(text)
+        if (characterCount == 0) {
+            return 0
+        }
+
+        return ceil(characterCount / charactersPerToken()).toInt()
+    }
+
+    private fun countCharacters(text: String): Int {
+        return text.length
+    }
+
+    private fun createPromptPlan(
+        systemMessages: List<AimoChatMessage>,
+        history: List<AimoChatMessage>,
+        prompt: AimoChatMessage,
+        taskMessages: List<AimoChatMessage>,
+        tools: List<ToolCallback>,
+    ): PromptPlan {
+        val fixedMessages = systemMessages + listOf(prompt) + taskMessages
+        val fixedInputTokens = estimateMessagesTokens(fixedMessages) + estimateToolTokens(tools)
+        val historyForPrompt = truncateHistoryByTokens(history, maxInputTokens - fixedInputTokens)
+        val promptCharacters = countMessageCharacters(systemMessages + historyForPrompt + prompt + taskMessages) +
+            countToolCharacters(tools)
+
+        return PromptPlan(
+            history = historyForPrompt,
+            promptCharacters = promptCharacters,
+        )
+    }
+
+    private fun recordPromptUsage(promptCharacters: Int, promptTokens: Int) {
+        if (promptTokens <= 0 || promptCharacters <= 0) {
+            return
+        }
+
+        synchronized(this) {
+            observedPromptCharacters += promptCharacters.toLong()
+            observedPromptTokens += promptTokens.toLong()
+        }
+    }
+
+    private fun ChatResponse.toObservedPromptTokens(): Int {
+        val usage = metadata.usage
+
+        if (usage.promptTokens > 0) {
+            return usage.promptTokens
+        }
+
+        val inferredFromUsage = usage.totalTokens - usage.completionTokens
+        if (inferredFromUsage > 0) {
+            return inferredFromUsage
+        }
+
+        val resultMetadata = result?.metadata
+        val promptCount = resultMetadata?.get<Any>("prompt_eval_count")?.toPositiveInt()
+            ?: resultMetadata?.get<Any>("prompt_tokens")?.toPositiveInt()
+            ?: resultMetadata?.get<Any>("input_tokens")?.toPositiveInt()
+        if (promptCount != null) {
+            return promptCount
+        }
+
+        val nativeUsage = usage.nativeUsage
+        if (nativeUsage is Map<*, *>) {
+            val nativePrompt = nativeUsage["prompt_eval_count"]?.toPositiveInt()
+                ?: nativeUsage["prompt_tokens"]?.toPositiveInt()
+                ?: nativeUsage["input_tokens"]?.toPositiveInt()
+            if (nativePrompt != null) {
+                return nativePrompt
+            }
+        }
+
+        return 0
+    }
+
+    private fun Any?.toPositiveInt(): Int? {
+        return when (this) {
+            is Number -> toInt().takeIf { it > 0 }
+            is String -> toIntOrNull()?.takeIf { it > 0 }
+            else -> null
+        }
+    }
+
+    private fun charactersPerToken(): Double {
+        synchronized(this) {
+            if (observedPromptTokens > 0) {
+                return (observedPromptCharacters.toDouble() / observedPromptTokens.toDouble())
+                    .coerceIn(MIN_CHARACTERS_PER_TOKEN, MAX_CHARACTERS_PER_TOKEN)
+            }
+        }
+
+        return DEFAULT_CHARACTERS_PER_TOKEN
+    }
+
+    private companion object {
+        const val DEFAULT_CHARACTERS_PER_TOKEN = 4.0
+        const val MIN_CHARACTERS_PER_TOKEN = 1.0
+        const val MAX_CHARACTERS_PER_TOKEN = 12.0
+    }
+}
+

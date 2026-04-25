@@ -12,6 +12,7 @@ data class ChatRequestEntity (
     val chatId: UUID,
     val requestId: UUID,
     val messages: List<ChatMessageEntity>,
+    val requestCharacters: Int,
     val createdAt: Instant,
 )
 
@@ -23,3 +24,4 @@ data class ChatMessageEntity (
     val thinking: String?,
     val toolName: String?,
 )
+

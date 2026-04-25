@@ -1,3 +1,8 @@
+spring:
+  mvc:
+    async:
+      request-timeout: 0s
+
 logging:
   level:
     org.springframework.ai: DEBUG

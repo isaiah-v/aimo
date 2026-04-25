@@ -55,10 +55,12 @@ internal class ChatResponseBuilder {
                     // If both are maps, merge them
                     existingValue is Map<*, *> && newValue is Map<*, *> ->
                         existingValue + newValue
-                    // If new value is not null, use it (last value wins)
-                    true -> newValue
-                    // Otherwise keep existing
-                    else -> existingValue ?: newValue
+                    // If both are strings, concatenate (e.g. thinking blocks streamed in chunks)
+                    existingValue is String && newValue is String ->
+                        existingValue + newValue
+                    // If new value is non-null, use it; otherwise keep existing
+                    newValue != null -> newValue
+                    else -> existingValue as Any
                 }
             }
         }

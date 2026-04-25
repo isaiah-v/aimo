@@ -79,6 +79,38 @@ class AimoChatClientDaoMemory: AimoChatClientDao {
         return requests[chatId]?.toList() ?: emptyList()
     }
 
+    override fun getChatRequests(chatId: UUID, maxRequestCharacters: Int): List<ChatRequestEntity> {
+        if (maxRequestCharacters <= 0) {
+            return emptyList()
+        }
+
+        val chatRequests = requests[chatId] ?: return emptyList()
+        if (chatRequests.isEmpty()) {
+            return emptyList()
+        }
+
+        var totalCharacters = 0L
+        val maxCharacters = maxRequestCharacters.toLong()
+        val selected = mutableListOf<ChatRequestEntity>()
+
+        // Pick newest requests first until the cumulative character budget would be exceeded.
+        for (request in chatRequests.asReversed()) {
+            val requestCharacters = request.requestCharacters.toLong()
+            if (totalCharacters + requestCharacters > maxCharacters) {
+                if (selected.isEmpty()) {
+                    // Always include the newest request so tail lookups retain the latest message id.
+                    selected.add(request)
+                }
+                break
+            }
+
+            selected.add(request)
+            totalCharacters += requestCharacters
+        }
+
+        return selected.asReversed()
+    }
+
     override fun getMessages(chatId: UUID): List<ChatMessageEntity> {
         // Flatten messages from all requests for the chat in insertion order
         return requests[chatId]?.flatMap { it.messages } ?: emptyList()
