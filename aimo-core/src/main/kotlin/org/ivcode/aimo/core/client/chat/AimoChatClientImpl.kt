@@ -24,7 +24,6 @@ import org.springframework.ai.chat.model.ToolContext
 import org.springframework.ai.chat.prompt.Prompt
 import org.springframework.ai.tool.ToolCallback
 import reactor.core.publisher.Flux
-import reactor.core.publisher.Mono
 import reactor.core.scheduler.Schedulers
 import java.time.Instant
 import java.util.UUID
@@ -37,9 +36,17 @@ internal class AimoChatClientImpl (
     private val promptFactory: PromptFactory,
     tools: List<ToolCallback>,
     private val systemMessages: List<SystemMessageCallback>,
+    maxInputTokens: Int = 5000,
 ) : AimoChatClient {
 
+    private val initialObservedPromptCharacters: Long = session.getProperty(METADATA_KEY__OBSERVED_PROMPT_CHARACTERS).toNonNegativeLong()
+    private val initialObservedPromptTokens: Long = session.getProperty(METADATA_KEY__OBSERVED_PROMPT_TOKENS).toNonNegativeLong()
     private val toolCallbacks: Map<String, ToolCallback> = tools.associateBy { it.toolDefinition.name() }
+    private val inputTokenBudgeter = ChatInputTokenBudgeter(
+        maxInputTokens = maxInputTokens,
+        initialObservedPromptCharacters = initialObservedPromptCharacters,
+        initialObservedPromptTokens = initialObservedPromptTokens,
+    )
 
     override fun chat(request: AimoChatRequest): AimoChatResponse {
         return doChat(request, null, this::call)
@@ -57,11 +64,19 @@ internal class AimoChatClientImpl (
         callback: ((AimoChatResponse) -> Unit)? = null,
         call: (responseId: UUID, messageId: Int, prompt: Prompt) -> ChatResponse,
     ): AimoChatResponse {
-        val historyEntities = dao.getMessages(chatId)
-        val history = historyEntities.map { it.toAimoChatMessage() }
+        val history = dao.getMessages(
+            chatId = chatId,
+            maxRequestCharacters = inputTokenBudgeter.maxRequestCharactersForLookup(),
+        ).map { it.toAimoChatMessage() }
 
         val responseId = UUID.randomUUID()
-        val messageStartId = historyEntities.lastOrNull()?.messageId?.plus(1) ?: 1
+        val messageStartId = dao.getChatRequests(chatId)
+            .lastOrNull()
+            ?.messages
+            ?.lastOrNull()
+            ?.messageId
+            ?.plus(1)
+            ?: 1
 
         val messages = mutableListOf<AimoChatMessage>()
 
@@ -71,20 +86,36 @@ internal class AimoChatClientImpl (
             content = request.prompt,
         )
 
+        val systemPromptMessages = getSystemMessages(messageStartId, createSystemMessageContext(responseId, request))
+
         var response: ChatResponse? = null
+        var requestCharacters = 0
 
         // start the request loop
         while(response == null || response.hasToolCalls()) {
             response = messageId(messageStartId, messages).let { messageId ->
-                val systemMessages = getSystemMessages(messageId, createSystemMessageContext(responseId, request))
-                val prompt = promptFactory.create(systemMessages + history + promptMessage + messages, toolCallbacks.values.toList())
 
-                val response = call(responseId, messageId, prompt)
-                callback?.invoke(createDoneMessage(responseId, messageId))
+                inputTokenBudgeter.prompt(
+                    systemMessages = systemPromptMessages,
+                    history = history,
+                    prompt = promptMessage,
+                    taskMessages = messages,
+                    tools = toolCallbacks.values.toList(),
+                    onPromptComputed = { promptCharacters -> requestCharacters += promptCharacters },
+                ) { msgs, tools ->
+                    val requestMessages = msgs.withoutThinking()
+                    val prompt = promptFactory.create(
+                        messages = requestMessages,
+                        tools = tools
+                    )
 
-                messages.add(response.toAimoChatMessage(messageId))
+                    val response = call(responseId, messageId, prompt)
+                    callback?.invoke(createDoneMessage(responseId, messageId))
 
-                response
+                    messages.add(response.toAimoChatMessage(messageId))
+
+                    response
+                }
             }
 
             if (response.hasToolCalls()) {
@@ -121,12 +152,15 @@ internal class AimoChatClientImpl (
             }
         }
 
+        persistTokenBudgeterCalibration()
+
         // write all messages, including the prompt, to the database at the end of the request loop
         dao.addChatRequest(
             ChatRequestEntity(
                 chatId = chatId,
                 requestId = responseId,
                 messages = (listOf(promptMessage) + messages).map { it.toChatMessageEntity(responseId) },
+                requestCharacters = requestCharacters,
                 createdAt = Instant.now(),
             ))
 
@@ -247,4 +281,39 @@ internal class AimoChatClientImpl (
             createdAt = Instant.now(),
         ))
     }
+
+    private fun List<AimoChatMessage>.withoutThinking(): List<AimoChatMessage> {
+        return map { message ->
+            if (message.thinking == null) {
+                message
+            } else {
+                message.copy(thinking = null)
+            }
+        }
+    }
+
+
+    private fun Any?.toNonNegativeLong(): Long {
+        return when (this) {
+            is Number -> toLong().coerceAtLeast(0)
+            is String -> toLongOrNull()?.coerceAtLeast(0) ?: 0
+            else -> 0
+        }
+    }
+
+    private fun persistTokenBudgeterCalibration() {
+        val calibration = inputTokenBudgeter.calibration()
+        if (calibration.observedPromptTokens <= 0L) {
+            return
+        }
+
+        session.writeProperty(METADATA_KEY__OBSERVED_PROMPT_CHARACTERS, calibration.observedPromptCharacters)
+        session.writeProperty(METADATA_KEY__OBSERVED_PROMPT_TOKENS, calibration.observedPromptTokens)
+    }
+
+    private companion object {
+        const val METADATA_KEY__OBSERVED_PROMPT_CHARACTERS = "chat.inputTokenBudgeter.observedPromptCharacters"
+        const val METADATA_KEY__OBSERVED_PROMPT_TOKENS = "chat.inputTokenBudgeter.observedPromptTokens"
+    }
+
 }

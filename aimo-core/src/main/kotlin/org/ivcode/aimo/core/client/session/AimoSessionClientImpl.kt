@@ -49,6 +49,7 @@ internal class AimoSessionClientImpl (
                 chatId = chatId,
                 requestId = requestId,
                 messages = messages.map { it.toChatMessageEntity(requestId) },
+                requestCharacters = messages.sumOf { it.content?.length ?: 0 },
                 createdAt = Instant.now(),
             )
         )

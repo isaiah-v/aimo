@@ -71,7 +71,8 @@ interface AimoChatClientDao {
     fun getChatRequests(chatId: UUID): List<ChatRequestEntity>
 
     fun getMessages(chatId: UUID): List<ChatMessageEntity>
-    
+    fun getMessages(chatId: UUID, maxRequestCharacters: Int): List<ChatMessageEntity>
+
     
     /**
      * Upsert session metadata for an existing chat session.
