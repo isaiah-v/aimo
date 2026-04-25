@@ -64,19 +64,19 @@ internal class AimoChatClientImpl (
         callback: ((AimoChatResponse) -> Unit)? = null,
         call: (responseId: UUID, messageId: Int, prompt: Prompt) -> ChatResponse,
     ): AimoChatResponse {
-        val history = dao.getMessages(
+        val historyEntities = dao.getMessages(
             chatId = chatId,
             maxRequestCharacters = inputTokenBudgeter.maxRequestCharactersForLookup(),
-        ).map { it.toAimoChatMessage() }
+        )
 
         val responseId = UUID.randomUUID()
-        val messageStartId = dao.getChatRequests(chatId)
+        val messageStartId = historyEntities
             .lastOrNull()
-            ?.messages
-            ?.lastOrNull()
             ?.messageId
             ?.plus(1)
             ?: 1
+
+        val history = historyEntities.map { it.toAimoChatMessage() }
 
         val messages = mutableListOf<AimoChatMessage>()
 
