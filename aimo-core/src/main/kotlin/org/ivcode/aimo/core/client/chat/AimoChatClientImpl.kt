@@ -64,132 +64,89 @@ internal class AimoChatClientImpl (
         callback: ((AimoChatResponse) -> Unit)? = null,
         call: (responseId: UUID, messageId: Int, prompt: Prompt) -> ChatResponse,
     ): AimoChatResponse {
-        val historyRequests = dao.getChatRequests(
+        val responseId = UUID.randomUUID()
+        val history = dao.getChatRequests(
             chatId = chatId,
             maxRequestCharacters = inputTokenBudgeter.maxRequestCharactersForLookup(),
-        )
-        val persistedRequests = dao.getChatRequests(chatId)
+        ).flatMap { it.messages.map { m -> m.toAimoChatMessage() } }
 
-        val responseId = UUID.randomUUID()
-        val messageStartId = persistedRequests
-            .lastOrNull()
-            ?.messages
-            ?.lastOrNull()
-            ?.messageId
-            ?.plus(1)
-            ?: 1
-
-        val history = historyRequests.flatMap { historyRequest ->
-            historyRequest.messages.map { it.toAimoChatMessage() }
-        }
-
-        val messages = mutableListOf<AimoChatMessage>()
-
-        // add user prompt message
-        val promptMessage = createUserMessage(
-            messageId = messageId(messageStartId, messages),
-            content = request.prompt,
-        )
-
-        val systemPromptMessages = getSystemMessages(messageStartId, createSystemMessageContext(responseId, request))
-
+        val systemMessages = getSystemMessages(createSystemMessageContext(responseId, request))
+        val promptMessage = createUserMessage(messageId = 1, content = request.prompt)
+        val taskMessages = mutableListOf<AimoChatMessage>()
+        val processedToolCallIds = mutableSetOf<String>()
         var response: ChatResponse? = null
 
-        // start the request loop
-        while(response == null || response.hasToolCalls()) {
-            response = messageId(messageStartId, messages).let { messageId ->
+        while (response == null || response.hasToolCalls()) {
+            val messageId = 2 + taskMessages.size
 
-                inputTokenBudgeter.prompt(
-                    systemMessages = systemPromptMessages,
-                    history = history,
-                    prompt = promptMessage,
-                    taskMessages = messages,
-                    tools = toolCallbacks.values.toList(),
-                ) { msgs, tools ->
-                    val requestMessages = msgs.withoutThinking()
-                    val prompt = promptFactory.create(
-                        messages = requestMessages,
-                        tools = tools
-                    )
-
-                    val response = call(responseId, messageId, prompt)
-                    callback?.invoke(createDoneMessage(responseId, messageId))
-
-                    messages.add(response.toAimoChatMessage(messageId))
-
-                    response
-                }
+            response = inputTokenBudgeter.prompt(
+                systemMessages = systemMessages,
+                history = history,
+                prompt = promptMessage,
+                taskMessages = taskMessages,
+                tools = toolCallbacks.values.toList(),
+            ) { msgs, tools ->
+                val prompt = promptFactory.create(messages = msgs.withoutThinking(), tools = tools)
+                val response = call(responseId, messageId, prompt)
+                callback?.invoke(createDoneMessage(responseId, messageId))
+                taskMessages.add(response.toAimoChatMessage(messageId))
+                response
             }
 
             if (response.hasToolCalls()) {
-                val toolContext = createToolContext (
-                    requestId = responseId,
-                    request = request,
-                )
+                val toolContext = createToolContext(requestId = responseId, request = request)
 
                 response.result?.output?.toolCalls?.forEach { toolCall ->
                     // TODO: run in parallel
+                    val toolCallKey = toolCall.id.ifBlank { "${toolCall.name}:${toolCall.arguments}" }
+                    if (!processedToolCallIds.add(toolCallKey)) return@forEach
 
-                    val toolCallback = toolCallbacks[toolCall.name]
-                    if (toolCallback != null) {
-                        val message = try {
-                            val toolResponse = toolCallback.call(toolCall.arguments, toolContext)
-
-                            createToolMessage(
-                                messageId = messageId(messageStartId, messages),
-                                content = toolResponse,
-                                toolName = toolCall.name,
-                            )
-                        } catch (e: Exception) {
-                            createToolMessage(
-                                messageId = messageId(messageStartId, messages),
-                                content = "Error: ${e.message}",
-                                toolName = toolCall.name,
-                            )
-                        }
-
-                        messages.add(message)
-                        callback?.onMessage(responseId, message)
+                    val toolCallback = toolCallbacks[toolCall.name] ?: return@forEach
+                    val message = try {
+                        createToolMessage(
+                            messageId = 2 + taskMessages.size,
+                            content = toolCallback.call(toolCall.arguments, toolContext),
+                            toolName = toolCall.name,
+                        )
+                    } catch (e: Exception) {
+                        createToolMessage(
+                            messageId = 2 + taskMessages.size,
+                            content = "Error: ${e.message}",
+                            toolName = toolCall.name,
+                        )
                     }
+
+                    taskMessages.add(message)
+                    callback?.onMessage(responseId, message)
                 }
             }
         }
 
         persistTokenBudgeterCalibration()
 
-        // Compute requestCharacters from persisted messages only, counting content only (excluding thinking).
-        // This excludes system messages, history, tools, and thinking metadata which are not persisted per request.
-        val requestCharacters = (listOf(promptMessage) + messages)
-            .sumOf { msg ->
-                // Only count message content, exclude thinking
-                msg.content?.length ?: 0
-            }
+        val allMessages = listOf(promptMessage) + taskMessages
+        dao.addChatRequest(ChatRequestEntity(
+            chatId = chatId,
+            requestId = responseId,
+            messages = allMessages.map { it.toChatMessageEntity(responseId) },
+            requestCharacters = allMessages.sumOf { it.content?.length ?: 0 },
+            createdAt = Instant.now(),
+        ))
 
-        // write all messages, including the prompt, to the database at the end of the request loop
-        dao.addChatRequest(
-            ChatRequestEntity(
-                chatId = chatId,
-                requestId = responseId,
-                messages = (listOf(promptMessage) + messages).map { it.toChatMessageEntity(responseId) },
-                requestCharacters = requestCharacters,
-                createdAt = Instant.now(),
-            ))
-
-        // return all messages acquired after the prompt, which includes the assistant response and any tool calls
         return AimoChatResponse(
             chatId = chatId,
             responseId = responseId,
-            messages = messages,
+            messages = taskMessages,
             createdAt = Instant.now(),
         )
     }
 
-    private fun getSystemMessages(messageId: Int, context: SystemMessageContext) : List<AimoChatMessage> {
+    private fun getSystemMessages(context: SystemMessageContext) : List<AimoChatMessage> {
         return systemMessages.mapNotNull { callback ->
             callback.call(context)
         }.map {
             createSystemMessage (
-                messageId = messageId,
+                messageId = 0,
                 content = it
             )
         }
@@ -207,11 +164,9 @@ internal class AimoChatClientImpl (
             .block()!!
     }
 
-    private fun messageId(messageStartId: Int, messages: List<AimoChatMessage>): Int = messageStartId + messages.size
-
 
     private fun ChatResponse.toAimoChatMessage(messageId: Int, done: Boolean = true): AimoChatMessage {
-        val thinking = result?.metadata?.get<String>("thinking")
+        val thinking = result?.metadata?.get<String>("thinking")?.takeIf { it.isNotBlank() }
 
         return createAssistantMessage(
             messageId = messageId,

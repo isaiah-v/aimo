@@ -32,7 +32,7 @@ class AimoChatClientDaoMemoryTest {
     }
 
     @Test
-    fun `getChatRequests with maxRequestCharacters excludes oversized newest request`() {
+    fun `getChatRequests with maxRequestCharacters keeps oversized newest request`() {
         val dao = AimoChatClientDaoMemory()
         val chatId = dao.createChatSession().chatId
 
@@ -41,7 +41,7 @@ class AimoChatClientDaoMemoryTest {
 
         val result = dao.getChatRequests(chatId, maxRequestCharacters = 30)
 
-        assertEquals(emptyList(), result)
+        assertEquals(listOf("r2"), result.map { it.messages.single().content })
     }
 
     @Test

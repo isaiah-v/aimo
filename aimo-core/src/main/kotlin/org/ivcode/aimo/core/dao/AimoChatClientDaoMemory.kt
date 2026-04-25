@@ -97,6 +97,10 @@ class AimoChatClientDaoMemory: AimoChatClientDao {
         for (request in chatRequests.asReversed()) {
             val requestCharacters = request.requestCharacters.toLong()
             if (totalCharacters + requestCharacters > maxCharacters) {
+                if (selected.isEmpty()) {
+                    // Always include the newest request so tail lookups retain the latest message id.
+                    selected.add(request)
+                }
                 break
             }
 
