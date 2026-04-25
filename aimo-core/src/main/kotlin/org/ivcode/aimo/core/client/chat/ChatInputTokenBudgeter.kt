@@ -158,8 +158,7 @@ internal class ChatInputTokenBudgeter(
         var tokenCount = 0
         val result = mutableListOf<AimoChatMessage>()
 
-        // Keep the most recent history first; fixed tokens are budgeted separately.
-        for (message in history.reversed()) {
+        for (message in history.asReversed()) {
             val messageTokens = estimateTokens(message.content ?: "")
             if (tokenCount + messageTokens > tokenBudget) {
                 break
@@ -168,7 +167,7 @@ internal class ChatInputTokenBudgeter(
             tokenCount += messageTokens
         }
 
-        return result.reversed()
+        return result.asReversed()
     }
 
     /**

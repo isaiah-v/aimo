@@ -79,12 +79,7 @@ class AimoChatClientDaoMemory: AimoChatClientDao {
         return requests[chatId]?.toList() ?: emptyList()
     }
 
-    override fun getMessages(chatId: UUID): List<ChatMessageEntity> {
-        // Flatten messages from all requests for the chat in insertion order
-        return requests[chatId]?.flatMap { it.messages } ?: emptyList()
-    }
-
-    override fun getMessages(chatId: UUID, maxRequestCharacters: Int): List<ChatMessageEntity> {
+    override fun getChatRequests(chatId: UUID, maxRequestCharacters: Int): List<ChatRequestEntity> {
         if (maxRequestCharacters <= 0) {
             return emptyList()
         }
@@ -109,7 +104,12 @@ class AimoChatClientDaoMemory: AimoChatClientDao {
             totalCharacters += requestCharacters
         }
 
-        return selected.asReversed().flatMap { it.messages }
+        return selected.asReversed()
+    }
+
+    override fun getMessages(chatId: UUID): List<ChatMessageEntity> {
+        // Flatten messages from all requests for the chat in insertion order
+        return requests[chatId]?.flatMap { it.messages } ?: emptyList()
     }
 
     override fun upsertSessionMetadata(

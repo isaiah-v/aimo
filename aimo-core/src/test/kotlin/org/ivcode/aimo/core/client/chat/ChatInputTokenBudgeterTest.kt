@@ -138,6 +138,27 @@ class ChatInputTokenBudgeterTest {
         assertEquals(history, afterCalibration)
     }
 
+    @Test
+    fun `historyForPrompt trims flat history messages from the oldest side`() {
+        val budgeter = ChatInputTokenBudgeter(maxInputTokens = 3)
+        val history = listOf(
+            message(1, "1234"),
+            message(2, "1234"),
+            message(3, "abcd"),
+            message(4, "abcd"),
+        )
+
+        val result = budgeter.historyForPrompt(
+            systemMessages = emptyList(),
+            history = history,
+            prompt = message(99, ""),
+            taskMessages = emptyList(),
+            tools = emptyList(),
+        )
+
+        assertEquals(listOf(history[1], history[2], history[3]), result)
+    }
+
     private fun message(id: Int, content: String) = AimoChatMessage(
         messageId = id,
         type = AimoChatMessageType.USER,
