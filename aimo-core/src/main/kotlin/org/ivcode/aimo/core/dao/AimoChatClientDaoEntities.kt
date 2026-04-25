@@ -24,3 +24,4 @@ data class ChatMessageEntity (
     val thinking: String?,
     val toolName: String?,
 )
+
