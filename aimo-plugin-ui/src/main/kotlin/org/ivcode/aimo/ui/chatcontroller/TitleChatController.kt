@@ -75,7 +75,7 @@ class TitleChatController(
         )
 
         // If set by the user, tell the LLM that the title was set
-        if(source == AimoChatMessageType.USER.name) {
+        if (source == AimoChatMessageType.USER.name) {
             sessionClient.addMessages(listOf(
                 AimoChatMessage (
                     messageId = 1,

@@ -59,7 +59,7 @@ internal class ChatResponseBuilder {
                     existingValue is String && newValue is String ->
                         existingValue + newValue
                     // If new value is non-null, use it; otherwise keep existing
-                    true -> newValue
+                    newValue != null -> newValue
                     else -> existingValue as Any
                 }
             }
