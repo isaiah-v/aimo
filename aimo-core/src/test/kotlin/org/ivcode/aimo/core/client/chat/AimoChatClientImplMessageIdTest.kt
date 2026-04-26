@@ -22,6 +22,7 @@ import reactor.core.publisher.Flux
 import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class AimoChatClientImplMessageIdTest {
@@ -151,32 +152,36 @@ class AimoChatClientImplMessageIdTest {
     }
 
     @Test
-    fun `chat does not persist duplicate tool message when tool call id repeats`() {
+    fun `chatStream done callback includes aggregated content for same message id`() {
         val dao = AimoChatClientDaoMemory()
         val chatId = dao.createChatSession().chatId
         val client = AimoChatClientImpl(
             chatId = chatId,
             session = TestSessionClient(chatId),
             dao = dao,
-            chatModel = SequencedChatModel(
-                responses = listOf(
-                    chatResponseWithToolCall(toolName = "echo", arguments = "{\"value\":\"hello\"}", toolCallId = "call-1"),
-                    chatResponseWithToolCall(toolName = "echo", arguments = "{\"value\":\"hello\"}", toolCallId = "call-1"),
-                    chatResponse(),
-                )
-            ),
+            chatModel = StreamingChatModel(listOf(
+                chatResponseWithThinking("", "hello"),
+                chatResponseWithThinking("", " world"),
+            )),
             promptFactory = TestPromptFactory(),
-            tools = toToolCallbacks(TestTools()),
+            tools = emptyList(),
             systemMessages = emptyList(),
             maxInputTokens = 4000,
         )
 
-        client.chat(AimoChatRequest(prompt = "use the tool", context = emptyMap()))
+        val callbackResponses = mutableListOf<org.ivcode.aimo.core.AimoChatResponse>()
+        client.chatStream(AimoChatRequest(prompt = "stream", context = emptyMap())) { response ->
+            callbackResponses.add(response)
+        }
 
-        val toolMessages = dao.getMessages(chatId).filter { it.type == "TOOL" }
-        assertEquals(1, toolMessages.size)
-        assertEquals("echo", toolMessages.single().toolName)
-        assertTrue((toolMessages.single().content ?: "").contains("echo:hello"))
+        val assistantEvents = callbackResponses
+            .flatMap { it.messages }
+            .filter { it.type.name == "ASSISTANT" && it.messageId == 2 }
+
+        val doneEvent = assistantEvents.lastOrNull()
+        assertNotNull(doneEvent)
+        assertEquals(true, doneEvent.done)
+        assertEquals("hello world", doneEvent.content)
     }
 
     private class TestPromptFactory : PromptFactory {

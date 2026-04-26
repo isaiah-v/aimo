@@ -73,7 +73,6 @@ internal class AimoChatClientImpl (
         val systemMessages = getSystemMessages(createSystemMessageContext(responseId, request))
         val promptMessage = createUserMessage(messageId = 1, content = request.prompt)
         val taskMessages = mutableListOf<AimoChatMessage>()
-        val processedToolCallIds = mutableSetOf<String>()
         var response: ChatResponse? = null
 
         while (response == null || response.hasToolCalls()) {
@@ -88,8 +87,9 @@ internal class AimoChatClientImpl (
             ) { msgs, tools ->
                 val prompt = promptFactory.create(messages = msgs.withoutThinking(), tools = tools)
                 val response = call(responseId, messageId, prompt)
-                callback?.invoke(createDoneMessage(responseId, messageId))
-                taskMessages.add(response.toAimoChatMessage(messageId))
+                val assistantMessage = response.toAimoChatMessage(messageId)
+                taskMessages.add(assistantMessage)
+                callback?.onMessage(responseId, assistantMessage)
                 response
             }
 
@@ -98,8 +98,6 @@ internal class AimoChatClientImpl (
 
                 response.result?.output?.toolCalls?.forEach { toolCall ->
                     // TODO: run in parallel
-                    val toolCallKey = toolCall.id.ifBlank { "${toolCall.name}:${toolCall.arguments}" }
-                    if (!processedToolCallIds.add(toolCallKey)) return@forEach
 
                     val toolCallback = toolCallbacks[toolCall.name] ?: return@forEach
                     val message = try {
@@ -227,17 +225,6 @@ internal class AimoChatClientImpl (
         }
     }
 
-    private fun createDoneMessage(responseId: UUID, messageId: Int) = AimoChatResponse(
-        chatId = chatId,
-        responseId = responseId,
-        messages = listOf(createAssistantMessage(
-            messageId = messageId,
-            content = null,
-            thinking = null,
-            done = true,
-        )),
-        createdAt = Instant.now(),
-    )
 
     fun ((AimoChatResponse)->Unit).onMessage(responseId: UUID, message: AimoChatMessage) {
         invoke(AimoChatResponse(
