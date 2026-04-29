@@ -3,13 +3,12 @@ package org.ivcode.aimo.core
 import org.ivcode.aimo.core.client.session.AimoSessionClientImpl
 import org.ivcode.aimo.core.controller.SystemMessageCallback
 import org.ivcode.aimo.core.dao.AimoChatClientDao
-import org.springframework.ai.chat.model.ChatModel
+import org.ivcode.aimo.core.model.AimoChatModel
 import org.springframework.ai.tool.ToolCallback
 import java.util.UUID
 
 internal class AimoImpl (
-    private val chatModel: ChatModel,
-    private val promptFactory: PromptFactory,
+    private val model: AimoChatModel,
     private val chatClientDao: AimoChatClientDao,
     private val tools: List<ToolCallback>,
     private val systemMessage: List<SystemMessageCallback>
@@ -19,8 +18,7 @@ internal class AimoImpl (
 
         AimoSessionClientImpl (
             chatId = it.chatId,
-            chatModel = chatModel,
-            promptFactory = promptFactory,
+            model = model,
             dao = chatClientDao,
             tools = tools,
             systemMessages = systemMessage,
