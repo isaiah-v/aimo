@@ -6,19 +6,18 @@ import org.ivcode.aimo.core.AimoChatMessageType
 import org.ivcode.aimo.core.AimoChatRequest
 import org.ivcode.aimo.core.AimoChatResponse
 import org.ivcode.aimo.core.AimoSessionClient
-import org.ivcode.aimo.core.PromptFactory
 import org.ivcode.aimo.core.client.chat.utils.toChatResponse
 import org.ivcode.aimo.core.controller.SystemMessageCallback
 import org.ivcode.aimo.core.controller.SystemMessageContext
 import org.ivcode.aimo.core.dao.AimoChatClientDao
 import org.ivcode.aimo.core.dao.ChatRequestEntity
+import org.ivcode.aimo.core.model.AimoChatModel
 import org.ivcode.aimo.core.toAimoChatMessage
 import org.ivcode.aimo.core.toChatMessageEntity
 import org.ivcode.aimo.core.util.CONTEXT_KEY__CHAT_ID
 import org.ivcode.aimo.core.util.CONTEXT_KEY__REQUEST_ID
 import org.ivcode.aimo.core.util.CONTEXT_KEY__SESSION
 import org.springframework.ai.chat.messages.MessageType
-import org.springframework.ai.chat.model.ChatModel
 import org.springframework.ai.chat.model.ChatResponse
 import org.springframework.ai.chat.model.ToolContext
 import org.springframework.ai.chat.prompt.Prompt
@@ -32,18 +31,16 @@ internal class AimoChatClientImpl (
     override val chatId: UUID,
     private val session: AimoSessionClient,
     private val dao: AimoChatClientDao,
-    private val chatModel: ChatModel,
-    private val promptFactory: PromptFactory,
+    private val model: AimoChatModel,
     tools: List<ToolCallback>,
     private val systemMessages: List<SystemMessageCallback>,
-    maxInputTokens: Int = 4000,
 ) : AimoChatClient {
 
     private val initialObservedPromptCharacters: Long = session.getProperty(METADATA_KEY__OBSERVED_PROMPT_CHARACTERS).toNonNegativeLong()
     private val initialObservedPromptTokens: Long = session.getProperty(METADATA_KEY__OBSERVED_PROMPT_TOKENS).toNonNegativeLong()
     private val toolCallbacks: Map<String, ToolCallback> = tools.associateBy { it.toolDefinition.name() }
     private val inputTokenBudgeter = ChatInputTokenBudgeter(
-        maxInputTokens = maxInputTokens,
+        maxInputTokens = model.contextSize,
         initialObservedPromptCharacters = initialObservedPromptCharacters,
         initialObservedPromptTokens = initialObservedPromptTokens,
     )
@@ -86,7 +83,7 @@ internal class AimoChatClientImpl (
                 taskMessages = taskMessages,
                 tools = toolCallbacks.values.toList(),
             ) { msgs, tools ->
-                val prompt = promptFactory.create(messages = msgs.withoutThinking(), tools = tools)
+                val prompt = model.promptFactory.create(messages = msgs.withoutThinking(), tools = tools)
                 val response = call(responseId, messageId, prompt)
                 callback?.invoke(createDoneMessage(responseId, messageId))
                 taskMessages.add(response.toAimoChatMessage(messageId))
@@ -153,11 +150,11 @@ internal class AimoChatClientImpl (
     }
 
     private fun call(responseId: UUID, messageId: Int, prompt: Prompt): ChatResponse {
-        return chatModel.call(prompt)
+        return model.chatModel.call(prompt)
     }
 
     private fun stream(responseId: UUID, messageId: Int, prompt: Prompt, callback: (AimoChatResponse) -> Unit): ChatResponse {
-        return chatModel.stream(prompt)
+        return model.chatModel.stream(prompt)
             .doCallback(responseId, messageId, callback)
             .toChatResponse()
             .subscribeOn(Schedulers.immediate())

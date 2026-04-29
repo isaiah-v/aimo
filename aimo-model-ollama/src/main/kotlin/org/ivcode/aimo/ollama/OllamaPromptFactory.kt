@@ -8,18 +8,20 @@ import org.springframework.ai.ollama.api.OllamaChatOptions
 import org.springframework.ai.tool.ToolCallback
 
 class OllamaPromptFactory(
-    private val modelName: String,
+    private val options: Map<String, Any>,
 ): PromptFactory {
     override fun create(
         messages: List<AimoChatMessage>,
         tools: List<ToolCallback>
     ): Prompt {
+        val builder = OllamaChatOptions.builder()
+        applyRawOptions(builder, options)
+
         return Prompt(
             messages.map { message -> message.toSpringAiMessage() },
-            OllamaChatOptions.builder()
+            builder
                 .toolCallbacks(*tools.toTypedArray())
                 .internalToolExecutionEnabled(false)
-                .model(modelName)
                 .build()
         )
     }
