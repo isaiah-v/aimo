@@ -1,0 +1,17 @@
+spring:
+  mvc:
+    async:
+      request-timeout: 0s
+
+logging:
+  level:
+    org.springframework.ai: DEBUG
+
+aimo.model.ollama:
+  assistant:
+    base-url: http://localhost:11434
+    primary: true
+    contextSize: 2048
+    options:
+      model: gpt-oss:20b
+      temperature: 0.7

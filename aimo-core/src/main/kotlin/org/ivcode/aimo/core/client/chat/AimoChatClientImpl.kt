@@ -6,19 +6,19 @@ import org.ivcode.aimo.core.AimoChatMessageType
 import org.ivcode.aimo.core.AimoChatRequest
 import org.ivcode.aimo.core.AimoChatResponse
 import org.ivcode.aimo.core.AimoSessionClient
-import org.ivcode.aimo.core.PromptFactory
 import org.ivcode.aimo.core.client.chat.utils.toChatResponse
 import org.ivcode.aimo.core.controller.SystemMessageCallback
 import org.ivcode.aimo.core.controller.SystemMessageContext
 import org.ivcode.aimo.core.dao.AimoChatClientDao
 import org.ivcode.aimo.core.dao.ChatRequestEntity
+import org.ivcode.aimo.core.model.AimoChatModel
+import org.ivcode.aimo.core.model.AimoChatResponseMapper
 import org.ivcode.aimo.core.toAimoChatMessage
 import org.ivcode.aimo.core.toChatMessageEntity
 import org.ivcode.aimo.core.util.CONTEXT_KEY__CHAT_ID
 import org.ivcode.aimo.core.util.CONTEXT_KEY__REQUEST_ID
 import org.ivcode.aimo.core.util.CONTEXT_KEY__SESSION
 import org.springframework.ai.chat.messages.MessageType
-import org.springframework.ai.chat.model.ChatModel
 import org.springframework.ai.chat.model.ChatResponse
 import org.springframework.ai.chat.model.ToolContext
 import org.springframework.ai.chat.prompt.Prompt
@@ -32,18 +32,16 @@ internal class AimoChatClientImpl (
     override val chatId: UUID,
     private val session: AimoSessionClient,
     private val dao: AimoChatClientDao,
-    private val chatModel: ChatModel,
-    private val promptFactory: PromptFactory,
+    private val model: AimoChatModel,
     tools: List<ToolCallback>,
     private val systemMessages: List<SystemMessageCallback>,
-    maxInputTokens: Int = 4000,
 ) : AimoChatClient {
 
     private val initialObservedPromptCharacters: Long = session.getProperty(METADATA_KEY__OBSERVED_PROMPT_CHARACTERS).toNonNegativeLong()
     private val initialObservedPromptTokens: Long = session.getProperty(METADATA_KEY__OBSERVED_PROMPT_TOKENS).toNonNegativeLong()
     private val toolCallbacks: Map<String, ToolCallback> = tools.associateBy { it.toolDefinition.name() }
     private val inputTokenBudgeter = ChatInputTokenBudgeter(
-        maxInputTokens = maxInputTokens,
+        maxInputTokens = model.contextSize,
         initialObservedPromptCharacters = initialObservedPromptCharacters,
         initialObservedPromptTokens = initialObservedPromptTokens,
     )
@@ -56,15 +54,16 @@ internal class AimoChatClientImpl (
         request: AimoChatRequest,
         callback: (AimoChatResponse) -> Unit
     ): AimoChatResponse {
-        return doChat(request, callback) { r, m, p -> stream(r, m, p, callback) }
+        return doChat(request, callback) { r, m, p, mapper -> stream(r, m, p, mapper, callback) }
     }
 
     private fun doChat (
         request: AimoChatRequest,
         callback: ((AimoChatResponse) -> Unit)? = null,
-        call: (responseId: UUID, messageId: Int, prompt: Prompt) -> ChatResponse,
+        call: (responseId: UUID, messageId: Int, prompt: Prompt, responseMapper: AimoChatResponseMapper) -> ChatResponse,
     ): AimoChatResponse {
         val responseId = UUID.randomUUID()
+        val responseMapper = model.responseMapperFactory.create()
         val history = dao.getChatRequests(
             chatId = chatId,
             maxRequestCharacters = inputTokenBudgeter.maxRequestCharactersForLookup(),
@@ -74,8 +73,9 @@ internal class AimoChatClientImpl (
         val promptMessage = createUserMessage(messageId = 1, content = request.prompt)
         val taskMessages = mutableListOf<AimoChatMessage>()
         var response: ChatResponse? = null
+        var assistantMessage: AimoChatMessage? = null
 
-        while (response == null || response.hasToolCalls()) {
+        while (response == null || !assistantMessage?.toolCalls.isNullOrEmpty()) {
             val messageId = 2 + taskMessages.size
 
             response = inputTokenBudgeter.prompt(
@@ -85,18 +85,18 @@ internal class AimoChatClientImpl (
                 taskMessages = taskMessages,
                 tools = toolCallbacks.values.toList(),
             ) { msgs, tools ->
-                val prompt = promptFactory.create(messages = msgs.withoutThinking(), tools = tools)
-                val response = call(responseId, messageId, prompt)
-                val assistantMessage = response.toAimoChatMessage(messageId)
-                taskMessages.add(assistantMessage)
-                callback?.onMessage(responseId, assistantMessage)
+                val prompt = model.promptFactory.create(messages = msgs.withoutThinking(), tools = tools)
+                val response = call(responseId, messageId, prompt, responseMapper)
+                callback?.invoke(createDoneMessage(responseId, messageId))
+                assistantMessage = responseMapper.toAimoChatMessage(response, messageId)
+                taskMessages.add(assistantMessage!!)
                 response
             }
 
-            if (response.hasToolCalls()) {
+            if (!assistantMessage?.toolCalls.isNullOrEmpty()) {
                 val toolContext = createToolContext(requestId = responseId, request = request)
 
-                response.result?.output?.toolCalls?.forEach { toolCall ->
+                assistantMessage!!.toolCalls!!.forEach { toolCall ->
                     // TODO: run in parallel
 
                     val toolCallback = toolCallbacks[toolCall.name] ?: return@forEach
@@ -105,12 +105,14 @@ internal class AimoChatClientImpl (
                             messageId = 2 + taskMessages.size,
                             content = toolCallback.call(toolCall.arguments, toolContext),
                             toolName = toolCall.name,
+                            toolCallId = toolCall.id,
                         )
                     } catch (e: Exception) {
                         createToolMessage(
                             messageId = 2 + taskMessages.size,
                             content = "Error: ${e.message}",
                             toolName = toolCall.name,
+                            toolCallId = toolCall.id,
                         )
                     }
 
@@ -150,28 +152,22 @@ internal class AimoChatClientImpl (
         }
     }
 
-    private fun call(responseId: UUID, messageId: Int, prompt: Prompt): ChatResponse {
-        return chatModel.call(prompt)
+    private fun call(responseId: UUID, messageId: Int, prompt: Prompt, responseMapper: AimoChatResponseMapper): ChatResponse {
+        return model.chatModel.call(prompt)
     }
 
-    private fun stream(responseId: UUID, messageId: Int, prompt: Prompt, callback: (AimoChatResponse) -> Unit): ChatResponse {
-        return chatModel.stream(prompt)
-            .doCallback(responseId, messageId, callback)
+    private fun stream(
+        responseId: UUID,
+        messageId: Int,
+        prompt: Prompt,
+        responseMapper: AimoChatResponseMapper,
+        callback: (AimoChatResponse) -> Unit,
+    ): ChatResponse {
+        return model.chatModel.stream(prompt)
+            .doCallback(responseId, messageId, responseMapper, callback)
             .toChatResponse()
             .subscribeOn(Schedulers.immediate())
             .block()!!
-    }
-
-
-    private fun ChatResponse.toAimoChatMessage(messageId: Int, done: Boolean = true): AimoChatMessage {
-        val thinking = result?.metadata?.get<String>("thinking")?.takeIf { it.isNotBlank() }
-
-        return createAssistantMessage(
-            messageId = messageId,
-            content = result?.output?.text,
-            thinking = thinking,
-            done = done,
-        )
     }
 
     private fun createSystemMessageContext(requestId: UUID, request: AimoChatRequest) = SystemMessageContext(
@@ -210,18 +206,23 @@ internal class AimoChatClientImpl (
 
 
 
-    private fun ChatResponse.toAimoStreamResponse(responseId: UUID, messageId: Int): AimoChatResponse {
+    private fun ChatResponse.toAimoStreamResponse(responseId: UUID, messageId: Int, responseMapper: AimoChatResponseMapper): AimoChatResponse {
         return AimoChatResponse(
             chatId = chatId,
             responseId = responseId,
-            messages = listOf(toAimoChatMessage(messageId, done = false)),
+            messages = listOf(responseMapper.toAimoChatMessage(this, messageId, done = false)),
             createdAt = Instant.now(),
         )
     }
 
-    private fun Flux<ChatResponse>.doCallback(responseId: UUID, messageId: Int, callback: (AimoChatResponse)->Unit): Flux<ChatResponse> {
+    private fun Flux<ChatResponse>.doCallback(
+        responseId: UUID,
+        messageId: Int,
+        responseMapper: AimoChatResponseMapper,
+        callback: (AimoChatResponse)->Unit,
+    ): Flux<ChatResponse> {
         return this.doOnNext { r ->
-            callback.invoke(r.toAimoStreamResponse(responseId, messageId))
+            callback.invoke(r.toAimoStreamResponse(responseId, messageId, responseMapper))
         }
     }
 
@@ -242,6 +243,10 @@ internal class AimoChatClientImpl (
             } else {
                 message.copy(thinking = null)
             }
+        }.filterNot { message ->
+            message.type == AimoChatMessageType.ASSISTANT
+                && message.content.isNullOrBlank()
+                && message.toolCalls.isNullOrEmpty()
         }
     }
 

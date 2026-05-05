@@ -2,14 +2,13 @@ package org.ivcode.aimo.core.conf
 
 import org.ivcode.aimo.core.Aimo
 import org.ivcode.aimo.core.AimoImpl
-import org.ivcode.aimo.core.PromptFactory
 import org.ivcode.aimo.core.controller.ChatController
 import org.ivcode.aimo.core.controller.ChatControllerEntity
 import org.ivcode.aimo.core.controller.SystemMessageCallback
 import org.ivcode.aimo.core.controller.toSystemMessageCallbacks
 import org.ivcode.aimo.core.controller.toToolCallbacks
 import org.ivcode.aimo.core.dao.AimoChatClientDao
-import org.springframework.ai.chat.model.ChatModel
+import org.ivcode.aimo.core.model.AimoChatModel
 import org.springframework.ai.tool.ToolCallback
 import org.springframework.beans.factory.getBeansWithAnnotation
 import org.springframework.context.ApplicationContext
@@ -49,12 +48,11 @@ class AimoConfig {
 
     @Bean
     fun createAimo (
-        chatModel: ChatModel,
-        promptFactory: PromptFactory,
+        primaryModel: AimoChatModel,
         chatClientDao: AimoChatClientDao,
         tools: List<ToolCallback>,
         systemMessages: List<SystemMessageCallback>,
     ): Aimo {
-        return AimoImpl(chatModel, promptFactory, chatClientDao, tools, systemMessages)
+        return AimoImpl(primaryModel, chatClientDao, tools, systemMessages)
     }
 }

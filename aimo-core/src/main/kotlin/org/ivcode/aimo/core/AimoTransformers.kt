@@ -24,6 +24,8 @@ internal fun ChatMessageEntity.toAimoChatMessage() = AimoChatMessage (
     content = content,
     thinking = thinking,
     toolName = toolName,
+    toolCallId = toolCallId,
+    toolCalls = toolCalls,
     done = true,
 )
 
@@ -44,4 +46,6 @@ internal fun AimoChatMessage.toChatMessageEntity(
     content = content,
     thinking = thinking,
     toolName = toolName,
+    toolCallId = toolCallId,
+    toolCalls = toolCalls,
 )

@@ -1,5 +1,6 @@
 package org.ivcode.aimo.core.dao
 
+import org.ivcode.aimo.core.AimoToolCall
 import java.time.Instant
 import java.util.UUID
 
@@ -23,5 +24,7 @@ data class ChatMessageEntity (
     val content: String?,
     val thinking: String?,
     val toolName: String?,
+    val toolCallId: String? = null,
+    val toolCalls: List<AimoToolCall>? = null,
 )
 

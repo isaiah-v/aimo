@@ -1,7 +1,7 @@
 
 plugins {
-    id("org.ivcode.gradle-www") version "0.1.0-SNAPSHOT"
-    id("org.ivcode.gradle-publish") version "0.1-SNAPSHOT"
+    id("org.ivcode.gradle-www").version("0.1.0-SNAPSHOT")
+    id("org.ivcode.gradle-publish").version("0.1-SNAPSHOT")
 }
 
 www {

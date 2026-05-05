@@ -76,16 +76,16 @@ class TitleChatController(
 
         // If set by the user, tell the LLM that the title was set
         if (source == AimoChatMessageType.USER.name) {
-            sessionClient.addMessages(listOf(
-                AimoChatMessage (
-                    messageId = 1,
-                    type = AimoChatMessageType.TOOL,
-                    content = objectMapper.writeValueAsString(response),
-                    thinking = null,
-                    toolName = TITLE_TOOL_NAME,
-                    done = true
-                )
-            ))
+             sessionClient.addMessages(listOf(
+                 AimoChatMessage (
+                     messageId = 1,
+                     type = AimoChatMessageType.TOOL,
+                     content = objectMapper.writeValueAsString(response),
+                     thinking = null,
+                     toolName = TITLE_TOOL_NAME,
+                     done = true
+                 )
+             ))
         }
 
         return response
