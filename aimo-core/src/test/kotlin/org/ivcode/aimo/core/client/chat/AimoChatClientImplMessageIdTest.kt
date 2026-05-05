@@ -28,6 +28,7 @@ import reactor.core.publisher.Flux
 import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class AimoChatClientImplMessageIdTest {
@@ -225,6 +226,40 @@ class AimoChatClientImplMessageIdTest {
         assertEquals(1, toolMessages.size)
         assertEquals("echo", toolMessages.single().toolName)
         assertTrue((toolMessages.single().content ?: "").contains("echo:hello"))
+    }
+
+    @Test
+    fun `chatStream done callback includes aggregated content for same message id`() {
+        val dao = AimoChatClientDaoMemory()
+        val chatId = dao.createChatSession().chatId
+        val client = AimoChatClientImpl(
+            chatId = chatId,
+            session = TestSessionClient(chatId),
+            dao = dao,
+            model = testModel(
+                chatModel = StreamingChatModel(listOf(
+                    chatResponseWithThinking("", "hello"),
+                    chatResponseWithThinking("", " world"),
+                )),
+                contextSize = 4000,
+            ),
+            tools = emptyList(),
+            systemMessages = emptyList(),
+        )
+
+        val callbackResponses = mutableListOf<org.ivcode.aimo.core.AimoChatResponse>()
+        client.chatStream(AimoChatRequest(prompt = "stream", context = emptyMap())) { response ->
+            callbackResponses.add(response)
+        }
+
+        val assistantEvents = callbackResponses
+            .flatMap { it.messages }
+            .filter { it.type.name == "ASSISTANT" && it.messageId == 2 }
+
+        val doneEvent = assistantEvents.lastOrNull()
+        assertNotNull(doneEvent)
+        assertEquals(true, doneEvent.done)
+        assertEquals("hello world", doneEvent.content)
     }
 
     @Test

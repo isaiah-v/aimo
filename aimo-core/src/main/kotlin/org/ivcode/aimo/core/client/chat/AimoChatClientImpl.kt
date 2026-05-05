@@ -72,7 +72,6 @@ internal class AimoChatClientImpl (
         val systemMessages = getSystemMessages(createSystemMessageContext(responseId, request))
         val promptMessage = createUserMessage(messageId = 1, content = request.prompt)
         val taskMessages = mutableListOf<AimoChatMessage>()
-        val processedToolCallIds = mutableSetOf<String>()
         var response: ChatResponse? = null
         var assistantMessage: AimoChatMessage? = null
 
@@ -99,8 +98,6 @@ internal class AimoChatClientImpl (
 
                 assistantMessage!!.toolCalls!!.forEach { toolCall ->
                     // TODO: run in parallel
-                    val toolCallKey = toolCall.id.ifBlank { "${toolCall.name}:${toolCall.arguments}" }
-                    if (!processedToolCallIds.add(toolCallKey)) return@forEach
 
                     val toolCallback = toolCallbacks[toolCall.name] ?: return@forEach
                     val message = try {
@@ -229,17 +226,6 @@ internal class AimoChatClientImpl (
         }
     }
 
-    private fun createDoneMessage(responseId: UUID, messageId: Int) = AimoChatResponse(
-        chatId = chatId,
-        responseId = responseId,
-        messages = listOf(createAssistantMessage(
-            messageId = messageId,
-            content = null,
-            thinking = null,
-            done = true,
-        )),
-        createdAt = Instant.now(),
-    )
 
     fun ((AimoChatResponse)->Unit).onMessage(responseId: UUID, message: AimoChatMessage) {
         invoke(AimoChatResponse(
