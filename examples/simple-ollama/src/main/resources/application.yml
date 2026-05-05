@@ -8,7 +8,7 @@ logging:
     org.springframework.ai: DEBUG
 
 aimo.model.ollama:
-  chatbot:
+  assistant:
     base-url: http://localhost:11434
     primary: true
     contextSize: 2048

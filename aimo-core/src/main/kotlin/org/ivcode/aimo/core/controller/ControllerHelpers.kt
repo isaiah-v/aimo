@@ -2,13 +2,35 @@ package org.ivcode.aimo.core.controller
 
 import org.springframework.ai.tool.ToolCallback
 import org.springframework.ai.tool.method.MethodToolCallbackProvider
+import kotlin.reflect.full.findAnnotation
+import kotlin.reflect.full.memberProperties
 
 internal fun toToolCallbacks(controller: Any): List<ToolCallback> {
+    if (!hasToolAnnotations(controller)) {
+        return emptyList()
+    }
+
     val provider = MethodToolCallbackProvider.builder()
         .toolObjects(controller)
         .build()
 
     return provider.toolCallbacks.toList()
+}
+
+private fun hasToolAnnotations(controller: Any): Boolean {
+    var type: Class<*>? = controller::class.java
+
+    while (type != null && type != Any::class.java) {
+        if (type.declaredMethods.any {
+                it.isAnnotationPresent(org.springframework.ai.tool.annotation.Tool::class.java)
+            }) {
+            return true
+        }
+
+        type = type.superclass
+    }
+
+    return false
 }
 
 /**
@@ -17,6 +39,7 @@ internal fun toToolCallbacks(controller: Any): List<ToolCallback> {
  *
  * Rules:
  * - Fields annotated with @SystemMessage will be used as-is (their toString() is returned).
+ * - Kotlin properties annotated with @SystemMessage are supported.
  * - Methods annotated with @SystemMessage must return String? and either take no parameters
  *   or a single parameter of type SystemMessageContext.
  */
@@ -31,6 +54,12 @@ internal fun toSystemMessageCallbacks(controller: Any): List<SystemMessageCallba
             trySetAccessible(field)
             callbacks += FieldSystemMessageCallback(controller, field)
         }
+    }
+
+    // Kotlin properties
+    for (property in controller::class.memberProperties) {
+        if (property.findAnnotation<SystemMessage>() == null) continue
+        callbacks += PropertySystemMessageCallback(controller, property)
     }
 
     // Methods

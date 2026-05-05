@@ -1,10 +1,10 @@
 pluginManagement {
     plugins {
-        kotlin("jvm") version "2.2.21"
-        kotlin("plugin.spring") version "2.2.21"
-        id("org.springframework.boot") version "4.0.3"
-        id("io.spring.dependency-management") version "1.1.7"
-        id("org.gradle.toolchains.foojay-resolver-convention") version "0.8.0"
+        kotlin("jvm").version("2.2.21")
+        kotlin("plugin.spring").version("2.2.21")
+        id("org.springframework.boot").version("4.0.3")
+        id("io.spring.dependency-management").version("1.1.7")
+        id("org.gradle.toolchains.foojay-resolver-convention").version("0.8.0")
     }
     repositories {
         gradlePluginPortal()
@@ -27,4 +27,4 @@ include("aimo-plugin-ui")
 include("aimo-ui")
 
 // --== Examples ==-- //
-include(":examples:basic")
+include(":examples:simple-ollama")

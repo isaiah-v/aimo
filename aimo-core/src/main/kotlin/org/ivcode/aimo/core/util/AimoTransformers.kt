@@ -15,7 +15,7 @@ fun AimoChatMessage.toSpringAiMessage(): Message {
         AimoChatMessageType.USER -> toUserMessage()
         AimoChatMessageType.ASSISTANT -> toAssistantMessage()
         AimoChatMessageType.SYSTEM -> toSystemMessage()
-        AimoChatMessageType.TOOL -> toToolMessage()
+        AimoChatMessageType.TOOL -> if (toolCallId.isNullOrBlank()) toLegacyToolFallbackSystemMessage() else toToolMessage()
     }
 }
 
@@ -36,6 +36,11 @@ private fun AimoChatMessage.toAssistantMessage(): AssistantMessage {
     if(this.thinking!=null) {
         builder.properties(mapOf("thinking" to this.thinking))
     }
+    if (!toolCalls.isNullOrEmpty()) {
+        builder.toolCalls(toolCalls.map {
+            AssistantMessage.ToolCall(it.id, "function", it.name, it.arguments)
+        })
+    }
 
     return builder.build()
 }
@@ -51,7 +56,7 @@ private fun AimoChatMessage.toSystemMessage(): SystemMessage {
 
 private fun AimoChatMessage.toToolMessage(): ToolResponseMessage {
     val toolResponse = ToolResponseMessage.ToolResponse (
-        "",
+        toolCallId!!,
         toolName ?: "",
         content ?: ""
     )
@@ -59,3 +64,21 @@ private fun AimoChatMessage.toToolMessage(): ToolResponseMessage {
         .responses(listOf(toolResponse))
         .build()
 }
+
+private fun AimoChatMessage.toLegacyToolFallbackSystemMessage(): SystemMessage {
+    val builder = SystemMessage.builder()
+    val message = buildString {
+        append("Legacy tool message without toolCallId")
+        if (!toolName.isNullOrBlank()) {
+            append(" from ")
+            append(toolName)
+        }
+        if (!content.isNullOrBlank()) {
+            append(": ")
+            append(content)
+        }
+    }
+    builder.text(message)
+    return builder.build()
+}
+

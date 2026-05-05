@@ -19,6 +19,12 @@ enum class AimoChatMessageType {
     TOOL,
 }
 
+data class AimoToolCall(
+    val id: String,
+    val name: String,
+    val arguments: String,
+)
+
 data class AimoChatResponse (
     val chatId: UUID,
     val responseId: UUID,
@@ -32,6 +38,8 @@ data class AimoChatMessage (
     val content: String?,
     val thinking: String?,
     val toolName: String?,
+    val toolCallId: String? = null,
+    val toolCalls: List<AimoToolCall>? = null,
     val done: Boolean?,
 )
 

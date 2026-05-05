@@ -32,6 +32,7 @@ class OllamaConfig {
                     .build(),
                 options = createChatOptions(resolvedOptions),
                 promptFactory = OllamaPromptFactory(resolvedOptions),
+                responseMapperFactory = { OllamaChatResponseMapper() },
                 isPrimary = modelProperties.primary,
                 contextSize = modelProperties.contextSize,
             )
